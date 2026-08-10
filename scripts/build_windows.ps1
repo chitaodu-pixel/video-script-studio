@@ -18,6 +18,7 @@ if (-not (Test-Path -LiteralPath $python)) {
     --collect-all faster_whisper `
     --collect-all ctranslate2 `
     --collect-all av `
+    --collect-all numpy `
     --collect-all tokenizers `
     --collect-all tkinterdnd2 `
     src/video_script_studio/portable_app.py

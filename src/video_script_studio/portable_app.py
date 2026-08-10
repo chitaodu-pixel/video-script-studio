@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import shutil
+import sys
 import threading
 import traceback
 import tkinter as tk
@@ -419,6 +420,20 @@ class PortableApp(TkinterDnD.Tk):
 
 
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == "--self-test":
+        source = Path(sys.argv[2])
+        output = Path(sys.argv[3])
+        audio = output.with_suffix(".wav")
+        try:
+            MediaService().extract_wav(source, audio)
+            segments = TranscriptionService().transcribe(audio, "small", "zh")
+            export_text(output, "".join(segment.text for segment in segments))
+        except Exception:
+            output.with_suffix(".error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+            return 1
+        finally:
+            audio.unlink(missing_ok=True)
+        return 0
     app = PortableApp()
     app.mainloop()
     return 0
