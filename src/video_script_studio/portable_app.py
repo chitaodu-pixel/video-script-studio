@@ -39,6 +39,7 @@ class PortableApp(TkinterDnD.Tk):
         self.ratio = tk.StringVar(value="1.0")
         self.voice = tk.StringVar()
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.text_counters: dict[tk.Text, tk.StringVar] = {}
         self._build()
         self.after(100, self._poll_events)
         self.after(300, self._load_voices)
@@ -140,9 +141,12 @@ class PortableApp(TkinterDnD.Tk):
         self.audio_label.pack(anchor="w")
         ttk.Button(tab, text="保存 MP3", command=self.save_audio).pack(anchor="e", pady=8)
 
-    @staticmethod
-    def _add_text_box(parent, label: str, height: int = 12) -> tk.Text:
-        ttk.Label(parent, text=label).pack(anchor="w", pady=(5, 2))
+    def _add_text_box(self, parent, label: str, height: int = 12) -> tk.Text:
+        heading = ttk.Frame(parent)
+        heading.pack(fill="x", pady=(5, 2))
+        ttk.Label(heading, text=label).pack(side="left")
+        counter = tk.StringVar(value="字数：0")
+        ttk.Label(heading, textvariable=counter).pack(side="right")
         frame = ttk.Frame(parent)
         frame.pack(fill="both", expand=True)
         text = tk.Text(frame, wrap="word", height=height, font=("Microsoft YaHei UI", 11), undo=True)
@@ -150,7 +154,22 @@ class PortableApp(TkinterDnD.Tk):
         text.configure(yscrollcommand=scrollbar.set)
         text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        self.text_counters[text] = counter
+        text.bind("<<Modified>>", self._on_text_modified, add="+")
+        text.edit_modified(False)
         return text
+
+    def _on_text_modified(self, event) -> None:
+        widget = event.widget
+        if widget.edit_modified():
+            self._update_text_counter(widget)
+            widget.edit_modified(False)
+
+    def _update_text_counter(self, widget: tk.Text) -> None:
+        counter = self.text_counters.get(widget)
+        if counter is not None:
+            text = widget.get("1.0", "end-1c")
+            counter.set(f"字数：{count_effective_characters(text)}")
 
     def _drop_enter(self, event):
         self.drop_area.configure(text="松开鼠标即可导入视频")
@@ -236,16 +255,16 @@ class PortableApp(TkinterDnD.Tk):
         self._load_widget(self.rewrite_result, root / "rewrite" / "rewrite.txt")
         self.status.set(f"当前项目：{root}")
 
-    @staticmethod
-    def _load_widget(widget: tk.Text, path: Path) -> None:
+    def _load_widget(self, widget: tk.Text, path: Path) -> None:
         widget.delete("1.0", "end")
         if path.exists():
             widget.insert("1.0", path.read_text(encoding="utf-8"))
+        self._update_text_counter(widget)
 
-    @staticmethod
-    def _set_widget(widget: tk.Text, text: str) -> None:
+    def _set_widget(self, widget: tk.Text, text: str) -> None:
         widget.delete("1.0", "end")
         widget.insert("1.0", text)
+        self._update_text_counter(widget)
 
     def choose_video(self) -> None:
         selected = filedialog.askopenfilename(
