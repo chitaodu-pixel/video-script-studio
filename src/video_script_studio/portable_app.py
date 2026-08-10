@@ -19,6 +19,7 @@ from video_script_studio.services.exporter import export_text
 from video_script_studio.services.kokoro_tts import KokoroTTSService, KokoroVoice
 from video_script_studio.services.media import SUPPORTED_VIDEO_EXTENSIONS, MediaService
 from video_script_studio.services.project_store import ProjectStore
+from video_script_studio.services.preview_audio import PreviewAudioStore
 from video_script_studio.services.rewriter import count_effective_characters, rewrite
 from video_script_studio.services.text_cleaner import wash_document
 from video_script_studio.services.transcription import TranscriptionService
@@ -39,6 +40,7 @@ class PortableApp(TkinterDnD.Tk):
         self.azure_credentials = AzureCredentialStore()
         self.kokoro_tts = KokoroTTSService()
         self.audio_player = WindowsAudioPlayer()
+        self.preview_audio = PreviewAudioStore()
         self.project = None
         self.project_root: Path | None = None
         self.selected_video: Path | None = None
@@ -159,10 +161,12 @@ class PortableApp(TkinterDnD.Tk):
         engine_combo.pack(side="left", padx=(8, 18))
         engine_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_tts_engine_changed())
         ttk.Label(controls, text="声优").pack(side="left")
-        self.voice_combo = ttk.Combobox(controls, textvariable=self.voice, state="readonly", width=46)
-        self.voice_combo.pack(side="left", padx=8)
-        ttk.Button(controls, text="刷新声优", command=self._load_voices).pack(side="left")
         ttk.Button(controls, text="转语音", style="Step.TButton", command=self.run_tts).pack(side="right")
+        ttk.Button(controls, text="刷新声优", command=self._load_voices).pack(
+            side="right", padx=(8, 6)
+        )
+        self.voice_combo = ttk.Combobox(controls, textvariable=self.voice, state="readonly")
+        self.voice_combo.pack(side="left", padx=(8, 0), fill="x", expand=True)
 
         online = ttk.LabelFrame(tab, text="在线神经声优设置（仅 Azure 模式需要）", padding=8)
         online.pack(fill="x", pady=(0, 8))
@@ -207,6 +211,9 @@ class PortableApp(TkinterDnD.Tk):
             audio_buttons, text="■ 停止试听", command=self.stop_audio, state="disabled"
         )
         self.stop_preview_button.pack(side="left", padx=8)
+        ttk.Button(
+            audio_buttons, text="清除全部试听", command=self.clear_preview_audio
+        ).pack(side="left", padx=8)
         ttk.Button(audio_buttons, text="保存 MP3", command=self.save_audio).pack(side="right")
 
     def _add_text_box(self, parent, label: str, height: int = 12) -> tk.Text:
@@ -521,7 +528,10 @@ class PortableApp(TkinterDnD.Tk):
         if not text:
             messagebox.showinfo("没有文本", "请先填写配音文本。", parent=self)
             return
-        destination = self.project_root / "tts" / f"配音-{datetime.now():%Y%m%d-%H%M%S}.mp3"
+        destination = (
+            self.preview_audio.directory(self.project_root)
+            / f"试听-{datetime.now():%Y%m%d-%H%M%S}.mp3"
+        )
         engine = self.tts_engine.get()
         selected_voice = self.voice_values.get(self.voice.get())
         if selected_voice is None:
@@ -604,6 +614,29 @@ class PortableApp(TkinterDnD.Tk):
             self.stop_preview_button.configure(state="disabled")
         if update_status:
             self.status.set("试听已停止。")
+
+    def clear_preview_audio(self) -> None:
+        if not self._ensure_project():
+            return
+        preview_dir = self.preview_audio.directory(self.project_root)
+        files = self.preview_audio.files(self.project_root)
+        if not files:
+            messagebox.showinfo("没有试听文件", "试听文件夹目前是空的。", parent=self)
+            return
+        confirmed = messagebox.askyesno(
+            "清除全部试听",
+            f"确定删除试听文件夹中的 {len(files)} 个文件吗？\n\n已另存的 MP3 不受影响。",
+            parent=self,
+        )
+        if not confirmed:
+            return
+        self.stop_audio(update_status=False)
+        deleted = self.preview_audio.clear(self.project_root)
+        if self.generated_audio and self.generated_audio.parent == preview_dir:
+            self.generated_audio = None
+            self.audio_label.configure(text="尚未生成 MP3")
+            self.preview_button.configure(state="disabled")
+        self.status.set(f"已清除 {deleted} 个试听文件。")
 
     def _on_close(self) -> None:
         self.audio_player.stop()
