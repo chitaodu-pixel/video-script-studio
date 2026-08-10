@@ -1,3 +1,4 @@
+import http.client
 import json
 import urllib.error
 
@@ -32,6 +33,39 @@ def test_azure_request_retries_direct_when_stale_proxy_fails(monkeypatch) -> Non
     )
 
     assert AzureTTSService._request(request) == b"direct-response"
+
+
+def test_azure_request_retries_truncated_direct_response(monkeypatch) -> None:
+    attempts = 0
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise http.client.IncompleteRead(b"partial", 100)
+            return b"complete"
+
+    class DirectOpener:
+        def open(self, _request, timeout=60):
+            return Response()
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            urllib.error.URLError("stale proxy")
+        )
+    )
+    monkeypatch.setattr("urllib.request.build_opener", lambda *_handlers: DirectOpener())
+    request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com")
+
+    assert AzureTTSService._request(request) == b"complete"
+    assert attempts == 2
 
 
 def test_azure_voice_list_keeps_chinese_neural_voices(monkeypatch) -> None:

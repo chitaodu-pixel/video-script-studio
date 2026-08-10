@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -29,13 +30,14 @@ class AzureTTSService:
 
     @staticmethod
     def _request(request: urllib.request.Request, timeout: int = 60) -> bytes:
-        # Keep an untouched copy: ProxyHandler mutates the original Request in-place.
-        direct_request = urllib.request.Request(
-            request.full_url,
-            data=request.data,
-            headers=dict(request.header_items()),
-            method=request.get_method(),
-        )
+        def clean_request() -> urllib.request.Request:
+            return urllib.request.Request(
+                request.full_url,
+                data=request.data,
+                headers=dict(request.header_items()),
+                method=request.get_method(),
+            )
+
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return response.read()
@@ -44,22 +46,25 @@ class AzureTTSService:
             raise ExternalProcessError(
                 f"Azure 语音服务返回 {exc.code}：{detail or exc.reason}"
             ) from exc
-        except urllib.error.URLError as proxy_exc:
+        except (urllib.error.URLError, http.client.IncompleteRead):
             # Proxy environment variables can remain after desktop proxy software is closed.
-            # Retry once without any proxy before reporting a network failure.
-            try:
-                direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                with direct.open(direct_request, timeout=timeout) as response:
-                    return response.read()
-            except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace").strip()
-                raise ExternalProcessError(
-                    f"Azure 语音服务返回 {exc.code}：{detail or exc.reason}"
-                ) from exc
-            except urllib.error.URLError as direct_exc:
-                raise ExternalProcessError(
-                    f"无法连接 Azure 语音服务（代理和直连均失败）：{direct_exc.reason}"
-                ) from direct_exc
+            # Also retry truncated Azure responses, which can occur on unstable networks.
+            direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            last_error: Exception | None = None
+            for _attempt in range(3):
+                try:
+                    with direct.open(clean_request(), timeout=timeout) as response:
+                        return response.read()
+                except urllib.error.HTTPError as exc:
+                    detail = exc.read().decode("utf-8", errors="replace").strip()
+                    raise ExternalProcessError(
+                        f"Azure 语音服务返回 {exc.code}：{detail or exc.reason}"
+                    ) from exc
+                except (urllib.error.URLError, http.client.IncompleteRead) as exc:
+                    last_error = exc
+            raise ExternalProcessError(
+                f"Azure 响应连续3次未完整接收：{last_error}"
+            ) from last_error
 
     def voices(self, key: str, region: str, language_prefix: str = "zh-") -> list[AzureVoice]:
         if not key.strip():

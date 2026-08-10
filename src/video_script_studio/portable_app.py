@@ -668,6 +668,19 @@ class PortableApp(TkinterDnD.Tk):
 
 
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--azure-voices-self-test":
+        output = Path(sys.argv[2])
+        try:
+            saved = AzureCredentialStore().load()
+            if not saved:
+                raise RuntimeError("没有找到已保存的 Azure 密钥。")
+            key, region = saved
+            voices = AzureTTSService().voices(key, region)
+            output.write_text(f"region={region}\nvoices={len(voices)}", encoding="utf-8")
+        except Exception:
+            output.with_suffix(".error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+            return 1
+        return 0
     if len(sys.argv) == 3 and sys.argv[1] == "--azure-connectivity-self-test":
         output = Path(sys.argv[2])
         try:
