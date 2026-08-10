@@ -292,6 +292,7 @@ class PortableApp(TkinterDnD.Tk):
                     self._voices_loaded(payload)
                 elif kind == "voices_error":
                     self.status.set(f"无法读取声优：{payload}")
+                    messagebox.showerror("无法刷新声优", str(payload), parent=self)
         except queue.Empty:
             pass
         self.after(100, self._poll_events)
@@ -493,6 +494,7 @@ class PortableApp(TkinterDnD.Tk):
                 else:
                     values = [(item, item) for item in self.tts.voices()]
             except Exception as exc:
+                self._write_error_log(exc)
                 self.events.put(("voices_error", f"{type(exc).__name__}: {exc}"))
                 return
             self.events.put(("voices_done", (engine, values)))
@@ -666,6 +668,20 @@ class PortableApp(TkinterDnD.Tk):
 
 
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--azure-connectivity-self-test":
+        output = Path(sys.argv[2])
+        try:
+            AzureTTSService().voices("deliberately-invalid-test-key", "eastasia")
+        except Exception as exc:
+            if "401" in str(exc):
+                output.write_text("Azure direct connection reached the service.", encoding="utf-8")
+                return 0
+            output.with_suffix(".error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+            return 1
+        output.with_suffix(".error.txt").write_text(
+            "Azure test unexpectedly accepted an invalid key.", encoding="utf-8"
+        )
+        return 1
     if len(sys.argv) == 3 and sys.argv[1] == "--path-self-test":
         Path(sys.argv[2]).write_text(str(resolve_app_root()), encoding="utf-8")
         return 0

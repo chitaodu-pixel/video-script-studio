@@ -1,6 +1,35 @@
 import json
+import urllib.error
 
 from video_script_studio.services.azure_tts import AzureTTSService, AzureVoice
+
+
+def test_azure_request_retries_direct_when_stale_proxy_fails(monkeypatch) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b"direct-response"
+
+    class DirectOpener:
+        def open(self, request, timeout=60):
+            assert request.full_url.startswith("https://eastasia.")
+            return Response()
+
+    def stale_proxy(*_args, **_kwargs):
+        raise urllib.error.URLError("proxy refused connection")
+
+    monkeypatch.setattr("urllib.request.urlopen", stale_proxy)
+    monkeypatch.setattr("urllib.request.build_opener", lambda *_handlers: DirectOpener())
+    request = __import__("urllib.request", fromlist=["Request"]).Request(
+        "https://eastasia.tts.speech.microsoft.com/cognitiveservices/voices/list"
+    )
+
+    assert AzureTTSService._request(request) == b"direct-response"
 
 
 def test_azure_voice_list_keeps_chinese_neural_voices(monkeypatch) -> None:
