@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 from video_script_studio.services.audio_player import WindowsAudioPlayer
+from video_script_studio.services.azure_tts import AzureTTSService, AzureVoice
 from video_script_studio.services.exporter import export_text
 from video_script_studio.services.media import SUPPORTED_VIDEO_EXTENSIONS, MediaService
 from video_script_studio.services.project_store import ProjectStore
@@ -32,6 +33,7 @@ class PortableApp(TkinterDnD.Tk):
         self.media = MediaService()
         self.transcriber = TranscriptionService()
         self.tts = WindowsTTSService()
+        self.azure_tts = AzureTTSService()
         self.audio_player = WindowsAudioPlayer()
         self.project = None
         self.project_root: Path | None = None
@@ -40,6 +42,13 @@ class PortableApp(TkinterDnD.Tk):
         self.status = tk.StringVar(value="准备就绪。")
         self.ratio = tk.StringVar(value="1.0")
         self.voice = tk.StringVar()
+        self.tts_engine = tk.StringVar(value="Windows 本地")
+        self.azure_region = tk.StringVar(value="eastasia")
+        self.azure_key = tk.StringVar()
+        self.tts_rate = tk.IntVar(value=0)
+        self.tts_pitch = tk.IntVar(value=0)
+        self.tts_volume = tk.IntVar(value=100)
+        self.voice_values: dict[str, str | AzureVoice] = {}
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.text_counters: dict[tk.Text, tk.StringVar] = {}
         self._build()
@@ -133,11 +142,46 @@ class PortableApp(TkinterDnD.Tk):
         self.tts_text = self._add_text_box(tab, "配音文本（可继续编辑）", height=15)
         controls = ttk.Frame(tab)
         controls.pack(fill="x", pady=8)
+        ttk.Label(controls, text="配音引擎").pack(side="left")
+        engine_combo = ttk.Combobox(
+            controls,
+            textvariable=self.tts_engine,
+            values=("Windows 本地", "Azure 在线神经"),
+            state="readonly",
+            width=16,
+        )
+        engine_combo.pack(side="left", padx=(8, 18))
+        engine_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_tts_engine_changed())
         ttk.Label(controls, text="声优").pack(side="left")
-        self.voice_combo = ttk.Combobox(controls, textvariable=self.voice, state="readonly", width=38)
+        self.voice_combo = ttk.Combobox(controls, textvariable=self.voice, state="readonly", width=46)
         self.voice_combo.pack(side="left", padx=8)
         ttk.Button(controls, text="刷新声优", command=self._load_voices).pack(side="left")
         ttk.Button(controls, text="转语音", style="Step.TButton", command=self.run_tts).pack(side="right")
+
+        online = ttk.LabelFrame(tab, text="在线神经声优设置（仅 Azure 模式需要）", padding=8)
+        online.pack(fill="x", pady=(0, 8))
+        ttk.Label(online, text="区域").pack(side="left")
+        ttk.Entry(online, textvariable=self.azure_region, width=14).pack(side="left", padx=(6, 16))
+        ttk.Label(online, text="Speech 密钥").pack(side="left")
+        ttk.Entry(online, textvariable=self.azure_key, show="●", width=42).pack(
+            side="left", padx=(6, 12), fill="x", expand=True
+        )
+        ttk.Label(online, text="密钥仅保存在当前运行内存中").pack(side="right")
+
+        tuning = ttk.LabelFrame(tab, text="声音调节", padding=8)
+        tuning.pack(fill="x", pady=(0, 8))
+        ttk.Label(tuning, text="语速（-50～50%）").pack(side="left")
+        ttk.Spinbox(tuning, from_=-50, to=50, textvariable=self.tts_rate, width=6).pack(
+            side="left", padx=(6, 18)
+        )
+        ttk.Label(tuning, text="音调（-20～20%）").pack(side="left")
+        ttk.Spinbox(tuning, from_=-20, to=20, textvariable=self.tts_pitch, width=6).pack(
+            side="left", padx=(6, 18)
+        )
+        ttk.Label(tuning, text="音量（0～100%）").pack(side="left")
+        ttk.Spinbox(tuning, from_=0, to=100, textvariable=self.tts_volume, width=6).pack(
+            side="left", padx=6
+        )
         self.tts_progress = ttk.Progressbar(tab, maximum=100)
         self.tts_progress.pack(fill="x", pady=8)
         self.audio_label = ttk.Label(tab, text="尚未生成 MP3")
@@ -219,6 +263,10 @@ class PortableApp(TkinterDnD.Tk):
                     self._tts_finished(Path(str(payload)))
                 elif kind == "tts_error":
                     self._tts_failed(str(payload))
+                elif kind == "voices_done":
+                    self._voices_loaded(payload)
+                elif kind == "voices_error":
+                    self.status.set(f"无法读取声优：{payload}")
         except queue.Empty:
             pass
         self.after(100, self._poll_events)
@@ -399,14 +447,43 @@ class PortableApp(TkinterDnD.Tk):
         self.notebook.select(3)
 
     def _load_voices(self) -> None:
-        try:
-            voices = self.tts.voices()
-        except Exception as exc:
-            self.status.set(f"无法读取 Windows 声优：{exc}")
+        engine = self.tts_engine.get()
+        key = self.azure_key.get()
+        region = self.azure_region.get()
+        if engine == "Azure 在线神经" and (not key.strip() or not region.strip()):
+            self.status.set("请填写 Azure Speech 密钥和区域，然后点击“刷新声优”。")
             return
-        self.voice_combo.configure(values=voices)
-        if voices and not self.voice.get():
-            self.voice.set(voices[0])
+        self.status.set(f"正在读取{engine}声优……")
+
+        def work() -> None:
+            try:
+                if engine == "Azure 在线神经":
+                    voices = self.azure_tts.voices(key, region)
+                    values = [(item.display_name, item) for item in voices]
+                else:
+                    values = [(item, item) for item in self.tts.voices()]
+            except Exception as exc:
+                self.events.put(("voices_error", f"{type(exc).__name__}: {exc}"))
+                return
+            self.events.put(("voices_done", (engine, values)))
+
+        threading.Thread(target=work, daemon=True, name="load-tts-voices").start()
+
+    def _voices_loaded(self, payload) -> None:
+        engine, values = payload
+        if engine != self.tts_engine.get():
+            return
+        self.voice_values = dict(values)
+        names = list(self.voice_values)
+        self.voice_combo.configure(values=names)
+        self.voice.set(names[0] if names else "")
+        self.status.set(f"已读取 {len(names)} 个{engine}声优。")
+
+    def _on_tts_engine_changed(self) -> None:
+        self.voice.set("")
+        self.voice_values.clear()
+        self.voice_combo.configure(values=())
+        self._load_voices()
 
     def run_tts(self) -> None:
         if not self._ensure_project():
@@ -416,6 +493,20 @@ class PortableApp(TkinterDnD.Tk):
             messagebox.showinfo("没有文本", "请先填写配音文本。", parent=self)
             return
         destination = self.project_root / "tts" / f"配音-{datetime.now():%Y%m%d-%H%M%S}.mp3"
+        engine = self.tts_engine.get()
+        selected_voice = self.voice_values.get(self.voice.get())
+        if selected_voice is None:
+            messagebox.showinfo("没有声优", "请先刷新并选择一个声优。", parent=self)
+            return
+        try:
+            rate = max(-50, min(50, int(self.tts_rate.get())))
+            pitch = max(-20, min(20, int(self.tts_pitch.get())))
+            volume = max(0, min(100, int(self.tts_volume.get())))
+        except (TypeError, ValueError, tk.TclError):
+            messagebox.showerror("参数不正确", "请检查语速、音调和音量。", parent=self)
+            return
+        azure_key = self.azure_key.get()
+        azure_region = self.azure_region.get()
         self.stop_audio(update_status=False)
         self.preview_button.configure(state="disabled")
         self.tts_progress.configure(value=10)
@@ -423,7 +514,23 @@ class PortableApp(TkinterDnD.Tk):
 
         def work() -> None:
             try:
-                self.tts.synthesize_mp3(text, destination, self.voice.get())
+                if engine == "Azure 在线神经":
+                    if not isinstance(selected_voice, AzureVoice):
+                        raise ValueError("在线声优信息无效，请重新刷新声优。")
+                    self.azure_tts.synthesize_mp3(
+                        text,
+                        destination,
+                        azure_key,
+                        azure_region,
+                        selected_voice,
+                        rate,
+                        pitch,
+                        volume,
+                    )
+                else:
+                    self.tts.synthesize_mp3(
+                        text, destination, str(selected_voice), rate, pitch, volume
+                    )
             except Exception as exc:
                 self._write_error_log(exc)
                 self.events.put(("tts_error", f"{type(exc).__name__}: {exc}"))

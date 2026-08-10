@@ -24,7 +24,12 @@ class WindowsTTSService:
         "$s=[System.Speech.Synthesis.SpeechSynthesizer]::new(); "
         "if($env:VSS_VOICE){$s.SelectVoice($env:VSS_VOICE)}; "
         "$text=[IO.File]::ReadAllText($env:VSS_TEXT,[Text.Encoding]::UTF8); "
-        "$s.SetOutputToWaveFile($env:VSS_WAV); $s.Speak($text); $s.Dispose()"
+        "$safe=[Security.SecurityElement]::Escape($text); "
+        "$voice=[Security.SecurityElement]::Escape($env:VSS_VOICE); "
+        "$ssml=\"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' \"+"
+        "\"xml:lang='zh-CN'><voice name='$voice'><prosody rate='$env:VSS_RATE%' \"+"
+        "\"pitch='$env:VSS_PITCH%' volume='$env:VSS_VOLUME%'>$safe</prosody></voice></speak>\"; "
+        "$s.SetOutputToWaveFile($env:VSS_WAV); $s.SpeakSsml($ssml); $s.Dispose()"
     )
 
     def __init__(self, media_service: MediaService | None = None) -> None:
@@ -48,7 +53,15 @@ class WindowsTTSService:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, list) else [parsed]
 
-    def synthesize_mp3(self, text: str, destination: Path, voice: str | None = None) -> None:
+    def synthesize_mp3(
+        self,
+        text: str,
+        destination: Path,
+        voice: str | None = None,
+        rate: int = 0,
+        pitch: int = 0,
+        volume: int = 100,
+    ) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="video-script-studio-tts-") as temp:
             temp_path = Path(temp)
@@ -57,7 +70,14 @@ class WindowsTTSService:
             text_path.write_text(text, encoding="utf-8")
             environment = os.environ.copy()
             environment.update(
-                {"VSS_TEXT": str(text_path), "VSS_WAV": str(wav_path), "VSS_VOICE": voice or ""}
+                {
+                    "VSS_TEXT": str(text_path),
+                    "VSS_WAV": str(wav_path),
+                    "VSS_VOICE": voice or "",
+                    "VSS_RATE": str(max(-50, min(50, rate))),
+                    "VSS_PITCH": str(max(-20, min(20, pitch))),
+                    "VSS_VOLUME": str(max(0, min(100, volume))),
+                }
             )
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", self.SPEAK_COMMAND],
