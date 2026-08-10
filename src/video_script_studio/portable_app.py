@@ -14,6 +14,7 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 
 from video_script_studio.services.audio_player import WindowsAudioPlayer
 from video_script_studio.services.azure_tts import AzureTTSService, AzureVoice
+from video_script_studio.services.credential_store import AzureCredentialStore
 from video_script_studio.services.exporter import export_text
 from video_script_studio.services.kokoro_tts import KokoroTTSService, KokoroVoice
 from video_script_studio.services.media import SUPPORTED_VIDEO_EXTENSIONS, MediaService
@@ -35,6 +36,7 @@ class PortableApp(TkinterDnD.Tk):
         self.transcriber = TranscriptionService()
         self.tts = WindowsTTSService()
         self.azure_tts = AzureTTSService()
+        self.azure_credentials = AzureCredentialStore()
         self.kokoro_tts = KokoroTTSService()
         self.audio_player = WindowsAudioPlayer()
         self.project = None
@@ -45,8 +47,10 @@ class PortableApp(TkinterDnD.Tk):
         self.ratio = tk.StringVar(value="1.0")
         self.voice = tk.StringVar()
         self.tts_engine = tk.StringVar(value="离线神经中文")
-        self.azure_region = tk.StringVar(value="eastasia")
-        self.azure_key = tk.StringVar()
+        saved_azure = self.azure_credentials.load()
+        self.azure_region = tk.StringVar(value=saved_azure[1] if saved_azure else "eastasia")
+        self.azure_key = tk.StringVar(value=saved_azure[0] if saved_azure else "")
+        self.remember_azure_key = tk.BooleanVar(value=saved_azure is not None)
         self.tts_rate = tk.IntVar(value=0)
         self.tts_pitch = tk.IntVar(value=0)
         self.tts_volume = tk.IntVar(value=100)
@@ -168,7 +172,12 @@ class PortableApp(TkinterDnD.Tk):
         ttk.Entry(online, textvariable=self.azure_key, show="●", width=42).pack(
             side="left", padx=(6, 12), fill="x", expand=True
         )
-        ttk.Label(online, text="密钥仅保存在当前运行内存中").pack(side="right")
+        ttk.Checkbutton(
+            online,
+            text="记住密钥（Windows 加密）",
+            variable=self.remember_azure_key,
+            command=self._on_remember_azure_changed,
+        ).pack(side="right")
 
         tuning = ttk.LabelFrame(tab, text="声音调节", padding=8)
         tuning.pack(fill="x", pady=(0, 8))
@@ -455,6 +464,8 @@ class PortableApp(TkinterDnD.Tk):
         if engine == "Azure 在线神经" and (not key.strip() or not region.strip()):
             self.status.set("请填写 Azure Speech 密钥和区域，然后点击“刷新声优”。")
             return
+        if engine == "Azure 在线神经":
+            self._save_azure_credentials()
         self.status.set(f"正在读取{engine}声优……")
 
         def work() -> None:
@@ -473,6 +484,19 @@ class PortableApp(TkinterDnD.Tk):
             self.events.put(("voices_done", (engine, values)))
 
         threading.Thread(target=work, daemon=True, name="load-tts-voices").start()
+
+    def _save_azure_credentials(self) -> None:
+        if self.remember_azure_key.get() and self.azure_key.get().strip():
+            self.azure_credentials.save(self.azure_key.get(), self.azure_region.get())
+        else:
+            self.azure_credentials.clear()
+
+    def _on_remember_azure_changed(self) -> None:
+        try:
+            self._save_azure_credentials()
+        except OSError as exc:
+            self.remember_azure_key.set(False)
+            messagebox.showerror("无法保存密钥", str(exc), parent=self)
 
     def _voices_loaded(self, payload) -> None:
         engine, values = payload
@@ -602,6 +626,18 @@ class PortableApp(TkinterDnD.Tk):
 
 
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--credential-self-test":
+        try:
+            store = AzureCredentialStore(Path(sys.argv[2]))
+            store.save("temporary-packaged-test-key", "eastasia")
+            if store.load() != ("temporary-packaged-test-key", "eastasia"):
+                raise RuntimeError("Windows 加密密钥读取结果不一致。")
+        except Exception:
+            Path(sys.argv[2]).with_suffix(".error.txt").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
+            return 1
+        return 0
     if len(sys.argv) in (3, 4) and sys.argv[1] == "--tts-self-test":
         output = Path(sys.argv[2])
         try:
