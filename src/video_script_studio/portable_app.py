@@ -15,6 +15,7 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 from video_script_studio.services.audio_player import WindowsAudioPlayer
 from video_script_studio.services.azure_tts import AzureTTSService, AzureVoice
 from video_script_studio.services.exporter import export_text
+from video_script_studio.services.kokoro_tts import KokoroTTSService, KokoroVoice
 from video_script_studio.services.media import SUPPORTED_VIDEO_EXTENSIONS, MediaService
 from video_script_studio.services.project_store import ProjectStore
 from video_script_studio.services.rewriter import count_effective_characters, rewrite
@@ -34,6 +35,7 @@ class PortableApp(TkinterDnD.Tk):
         self.transcriber = TranscriptionService()
         self.tts = WindowsTTSService()
         self.azure_tts = AzureTTSService()
+        self.kokoro_tts = KokoroTTSService()
         self.audio_player = WindowsAudioPlayer()
         self.project = None
         self.project_root: Path | None = None
@@ -42,13 +44,13 @@ class PortableApp(TkinterDnD.Tk):
         self.status = tk.StringVar(value="准备就绪。")
         self.ratio = tk.StringVar(value="1.0")
         self.voice = tk.StringVar()
-        self.tts_engine = tk.StringVar(value="Windows 本地")
+        self.tts_engine = tk.StringVar(value="离线神经中文")
         self.azure_region = tk.StringVar(value="eastasia")
         self.azure_key = tk.StringVar()
         self.tts_rate = tk.IntVar(value=0)
         self.tts_pitch = tk.IntVar(value=0)
         self.tts_volume = tk.IntVar(value=100)
-        self.voice_values: dict[str, str | AzureVoice] = {}
+        self.voice_values: dict[str, str | AzureVoice | KokoroVoice] = {}
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.text_counters: dict[tk.Text, tk.StringVar] = {}
         self._build()
@@ -146,7 +148,7 @@ class PortableApp(TkinterDnD.Tk):
         engine_combo = ttk.Combobox(
             controls,
             textvariable=self.tts_engine,
-            values=("Windows 本地", "Azure 在线神经"),
+            values=("离线神经中文", "Windows 本地", "Azure 在线神经"),
             state="readonly",
             width=16,
         )
@@ -460,6 +462,9 @@ class PortableApp(TkinterDnD.Tk):
                 if engine == "Azure 在线神经":
                     voices = self.azure_tts.voices(key, region)
                     values = [(item.display_name, item) for item in voices]
+                elif engine == "离线神经中文":
+                    voices = self.kokoro_tts.voices()
+                    values = [(item.display_name, item) for item in voices]
                 else:
                     values = [(item, item) for item in self.tts.voices()]
             except Exception as exc:
@@ -526,6 +531,12 @@ class PortableApp(TkinterDnD.Tk):
                         rate,
                         pitch,
                         volume,
+                    )
+                elif engine == "离线神经中文":
+                    if not isinstance(selected_voice, KokoroVoice):
+                        raise ValueError("离线中文声优信息无效，请重新刷新声优。")
+                    self.kokoro_tts.synthesize_mp3(
+                        text, destination, selected_voice, rate, pitch, volume
                     )
                 else:
                     self.tts.synthesize_mp3(

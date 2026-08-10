@@ -21,6 +21,11 @@ if (-not (Test-Path -LiteralPath $python)) {
     --collect-all numpy `
     --collect-all tokenizers `
     --collect-all tkinterdnd2 `
+    --collect-all kokoro_onnx `
+    --collect-all misaki `
+    --collect-all soundfile `
+    --collect-all jieba `
+    --collect-all ordered_set `
     src/video_script_studio/portable_app.py
 
 Write-Host "Build complete: $projectRoot\dist\VideoScriptStudio.exe"

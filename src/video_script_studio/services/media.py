@@ -86,6 +86,43 @@ class MediaService:
             ]
         )
 
+    def wav_to_mp3_adjusted(
+        self,
+        source: Path,
+        destination: Path,
+        rate: int = 0,
+        pitch: int = 0,
+        volume: int = 100,
+        overwrite: bool = True,
+    ) -> None:
+        """Convert WAV to MP3 while applying the sound controls."""
+        if not source.is_file():
+            raise FileNotFoundError(f"音频文件不存在：{source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        tempo = max(0.5, min(1.5, 1 + rate / 100))
+        pitch_factor = 2 ** (max(-20, min(20, pitch)) / 100 / 12)
+        filters = [
+            f"asetrate=24000*{pitch_factor:.8f}",
+            "aresample=24000",
+            f"atempo={tempo / pitch_factor:.8f}",
+            f"volume={max(0, min(100, volume)) / 100:.4f}",
+        ]
+        self._run(
+            [
+                self.ffmpeg,
+                "-y" if overwrite else "-n",
+                "-i",
+                str(source),
+                "-af",
+                ",".join(filters),
+                "-codec:a",
+                "libmp3lame",
+                "-q:a",
+                "2",
+                str(destination),
+            ]
+        )
+
     @staticmethod
     def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
         try:
