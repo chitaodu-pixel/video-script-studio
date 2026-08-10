@@ -59,6 +59,25 @@ class KokoroTTSService:
             )
         return self._engine
 
+    @staticmethod
+    def _chunk_phonemes(phonemes: str, limit: int = 400) -> list[str]:
+        """Keep every model call below Kokoro's 510-token style-vector limit."""
+        chunks: list[str] = []
+        remaining = phonemes.strip()
+        separators = "。！？；，,.!?;\n "
+        while len(remaining) > limit:
+            window = remaining[: limit + 1]
+            split_at = max(window.rfind(mark) for mark in separators)
+            if split_at < limit // 2:
+                split_at = limit
+            else:
+                split_at += 1
+            chunks.append(remaining[:split_at].strip())
+            remaining = remaining[split_at:].strip()
+        if remaining:
+            chunks.append(remaining)
+        return chunks
+
     def synthesize_mp3(
         self,
         text: str,
@@ -76,9 +95,17 @@ class KokoroTTSService:
         phonemes, _ = zh.ZHG2P(version="1.1")(text)
         if not phonemes:
             raise ValueError("没有可用于配音的中文文本。")
-        samples, sample_rate = self._load_engine().create(
-            phonemes, voice=voice.voice_id, speed=1, is_phonemes=True
-        )
+        import numpy as np
+
+        engine = self._load_engine()
+        audio_parts = []
+        sample_rate = 24000
+        for chunk in self._chunk_phonemes(phonemes):
+            samples, sample_rate = engine.create(
+                chunk, voice=voice.voice_id, speed=1, is_phonemes=True
+            )
+            audio_parts.extend((samples, np.zeros(round(sample_rate * 0.12), dtype=np.float32)))
+        samples = np.concatenate(audio_parts)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="video-script-studio-kokoro-") as temp:
             wav_path = Path(temp) / "speech.wav"

@@ -602,12 +602,17 @@ class PortableApp(TkinterDnD.Tk):
 
 
 def main() -> int:
-    if len(sys.argv) == 3 and sys.argv[1] == "--tts-self-test":
+    if len(sys.argv) in (3, 4) and sys.argv[1] == "--tts-self-test":
         output = Path(sys.argv[2])
         try:
             service = KokoroTTSService()
+            test_text = (
+                Path(sys.argv[3]).read_text(encoding="utf-8")
+                if len(sys.argv) == 4
+                else "欢迎使用视频文案工作台。这是离线中文配音测试。"
+            )
             service.synthesize_mp3(
-                "欢迎使用视频文案工作台。这是离线中文配音测试。",
+                test_text,
                 output,
                 service.voices()[0],
             )
