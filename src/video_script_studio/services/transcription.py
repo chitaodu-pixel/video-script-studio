@@ -15,7 +15,12 @@ class TranscriptionService:
         language: str = "zh",
         progress: Callable[[int], None] | None = None,
     ) -> list[TranscriptSegment]:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "当前程序未安装 faster-whisper，已停止识别以避免生成错误文案。"
+            ) from exc
 
         model = WhisperModel(model_name, device="cpu", compute_type="int8")
         source, info = model.transcribe(str(audio_path), language=language)
@@ -37,4 +42,3 @@ class TranscriptionService:
             for segment in segments
         ]
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
