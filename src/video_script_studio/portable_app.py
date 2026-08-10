@@ -16,7 +16,7 @@ from video_script_studio.services.exporter import export_text
 from video_script_studio.services.media import SUPPORTED_VIDEO_EXTENSIONS, MediaService
 from video_script_studio.services.project_store import ProjectStore
 from video_script_studio.services.rewriter import count_effective_characters, rewrite
-from video_script_studio.services.text_cleaner import clean_text
+from video_script_studio.services.text_cleaner import wash_document
 from video_script_studio.services.transcription import TranscriptionService
 from video_script_studio.services.windows_tts import WindowsTTSService
 
@@ -336,11 +336,17 @@ class PortableApp(TkinterDnD.Tk):
         self.notebook.select(1)
 
     def run_wash(self) -> None:
-        result = clean_text(self.wash_original.get("1.0", "end-1c"))
+        source = self.wash_original.get("1.0", "end-1c")
+        wash = wash_document(source)
+        result = wash.text
         self._set_widget(self.wash_result, result)
         if self._ensure_project():
             export_text(self.project_root / "transcript" / "cleaned.txt", result)
-        self.status.set("洗稿完成；原稿未被覆盖。")
+        similarity = round(wash.similarity * 100)
+        self.status.set(
+            f"洗稿完成：校正 {wash.correction_count} 处，改写 {wash.rewrite_count} 处，"
+            f"文字相似度约 {similarity}%；请人工复核专有名词。"
+        )
 
     def to_rewrite(self) -> None:
         self._set_widget(self.rewrite_source, self.wash_result.get("1.0", "end-1c"))
