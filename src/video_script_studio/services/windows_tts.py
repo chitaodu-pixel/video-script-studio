@@ -8,6 +8,7 @@ from pathlib import Path
 
 from video_script_studio.domain.errors import ExternalProcessError
 from video_script_studio.services.media import MediaService
+from video_script_studio.services.subprocess_utils import hidden_subprocess_kwargs
 
 
 class WindowsTTSService:
@@ -31,12 +32,13 @@ class WindowsTTSService:
 
     def voices(self) -> list[str]:
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", self.VOICE_COMMAND],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", self.VOICE_COMMAND],
             capture_output=True,
             text=True,
             encoding="utf-8",
             timeout=30,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
         if result.returncode != 0:
             raise ExternalProcessError(result.stderr.strip() or "无法读取 Windows 声优")
@@ -58,13 +60,14 @@ class WindowsTTSService:
                 {"VSS_TEXT": str(text_path), "VSS_WAV": str(wav_path), "VSS_VOICE": voice or ""}
             )
             result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command", self.SPEAK_COMMAND],
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", self.SPEAK_COMMAND],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 timeout=600,
                 env=environment,
                 check=False,
+                **hidden_subprocess_kwargs(),
             )
             if result.returncode != 0 or not wav_path.exists():
                 raise ExternalProcessError(result.stderr.strip() or "Windows 语音合成失败")

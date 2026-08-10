@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from video_script_studio.domain.errors import EnvironmentDependencyError, ExternalProcessError
+from video_script_studio.services.subprocess_utils import hidden_subprocess_kwargs
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".m4v"}
@@ -88,7 +89,13 @@ class MediaService:
     @staticmethod
     def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
         try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                check=False,
+                **hidden_subprocess_kwargs(),
+            )
         except FileNotFoundError as exc:
             raise EnvironmentDependencyError(f"找不到外部程序：{args[0]}") from exc
         if result.returncode != 0:

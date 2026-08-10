@@ -5,6 +5,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+from video_script_studio.services.subprocess_utils import hidden_subprocess_kwargs
+
 
 @dataclass(frozen=True, slots=True)
 class DependencyStatus:
@@ -21,7 +23,12 @@ def _executable_status(name: str, version_args: list[str], guidance: str) -> Dep
         return DependencyStatus(name, False, None, None, guidance)
     try:
         result = subprocess.run(
-            [path, *version_args], capture_output=True, text=True, timeout=10, check=False
+            [path, *version_args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            **hidden_subprocess_kwargs(),
         )
         first_line = (result.stdout or result.stderr).splitlines()[0]
     except (OSError, subprocess.SubprocessError, IndexError):
@@ -43,4 +50,3 @@ def check_environment() -> list[DependencyStatus]:
         _executable_status("ffmpeg", ["-version"], "请安装 FFmpeg 并将 bin 目录加入 PATH。"),
         _executable_status("ffprobe", ["-version"], "请安装 FFmpeg 并将 bin 目录加入 PATH。"),
     ]
-

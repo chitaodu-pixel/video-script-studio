@@ -9,9 +9,11 @@ def test_probe_uses_argument_list_and_supports_space_path(monkeypatch, tmp_path)
     source = tmp_path / "中文 视频.mp4"
     source.write_bytes(b"fixture")
     captured = []
+    captured_kwargs = []
 
-    def fake_run(args, **_kwargs):
+    def fake_run(args, **kwargs):
         captured.append(args)
+        captured_kwargs.append(kwargs)
         payload = {"format": {"duration": "2.5", "format_name": "mov,mp4", "size": "7"}}
         return CompletedProcess(args, 0, json.dumps(payload), "")
 
@@ -20,6 +22,7 @@ def test_probe_uses_argument_list_and_supports_space_path(monkeypatch, tmp_path)
     assert info.duration == 2.5
     assert captured[0][-1] == str(source)
     assert isinstance(captured[0], list)
+    assert captured_kwargs[0].get("creationflags", 0) != 0
 
 
 def test_extract_wav_builds_required_pcm_arguments(monkeypatch, tmp_path) -> None:
@@ -36,4 +39,3 @@ def test_extract_wav_builds_required_pcm_arguments(monkeypatch, tmp_path) -> Non
     MediaService().extract_wav(source, destination)
     assert ["-ac", "1", "-ar", "16000"] == captured[0][captured[0].index("-ac") : -1]
     assert captured[0][-1] == str(destination)
-
