@@ -1,0 +1,2 @@
+[console_scripts]
+video-script-studio = video_script_studio.app:main

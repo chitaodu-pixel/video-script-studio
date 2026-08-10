@@ -11,6 +11,7 @@ dist/
 models/
 projects/
 logs/
+work/
 *.mp4
 *.mov
 *.mkv
@@ -25,4 +26,3 @@ Thumbs.db
 !tests/fixtures/**/*.wav
 !tests/fixtures/**/*.mp3
 !tests/fixtures/**/*.mp4
-

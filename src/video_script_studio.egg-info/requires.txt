@@ -1,0 +1,9 @@
+PySide6<7,>=6.8
+faster-whisper<2,>=1.1
+pyttsx3<3,>=2.98
+
+[dev]
+pytest<9,>=8.3
+pytest-qt<5,>=4.4
+ruff<1,>=0.9
+pyinstaller<7,>=6.11

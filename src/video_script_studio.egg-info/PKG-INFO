@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: video-script-studio
+Version: 0.1.0
+Summary: Offline-first Windows video transcription, rewriting and TTS desktop tool
+Requires-Python: <3.13,>=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: PySide6<7,>=6.8
+Requires-Dist: faster-whisper<2,>=1.1
+Requires-Dist: pyttsx3<3,>=2.98
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8.3; extra == "dev"
+Requires-Dist: pytest-qt<5,>=4.4; extra == "dev"
+Requires-Dist: ruff<1,>=0.9; extra == "dev"
+Requires-Dist: pyinstaller<7,>=6.11; extra == "dev"
+
+# VideoScript Studio
+
+Windows 本地视频文案处理工具。一期目标是使用 CPU 完成视频音频提取、离线转写、文本清洗与改写、实体替换、本地配音，以及 TXT/SRT/WAV/MP3 导出。
+
+开发要求和验收标准见 [CODEX_TASK_PHASE1.md](CODEX_TASK_PHASE1.md)。
+
+## 当前阶段
+
+仓库初始化中。稳定分支为 `main`，一期开发分支为 `phase1/cpu-mvp`。
+
