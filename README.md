@@ -1,14 +1,13 @@
 # VideoScript Studio
 
-Windows 本地视频文案处理工具。一期目标是使用 CPU 完成视频音频提取、离线转写、文本清洗与改写、实体替换、本地配音，以及 TXT/SRT/WAV/MP3 导出。
+Windows 本地视频文案处理工具。一期 CPU MVP 提供四步工作流：提取文案、洗稿、改稿和文本转语音。
 
-开发要求和验收标准见 [CODEX_TASK_PHASE1.md](CODEX_TASK_PHASE1.md)。
+- 项目目录：`E:\pj\video-script-studio`
+- GitHub：<https://github.com/chitaodu-pixel/video-script-studio>
+- 开发任务书：[CODEX_TASK_PHASE1.md](CODEX_TASK_PHASE1.md)
+- 开发分支：`phase1/cpu-mvp`
 
-## 当前阶段
-
-稳定分支为 `main`，一期开发分支为 `phase1/cpu-mvp`。
-
-## 运行当前 Windows 构建
+## 运行 Windows 版本
 
 双击：
 
@@ -16,16 +15,35 @@ Windows 本地视频文案处理工具。一期目标是使用 CPU 完成视频�
 E:\pj\video-script-studio\dist\VideoScriptStudio.exe
 ```
 
-当前可执行构建采用四步工作流：
+## 四步功能
 
-1. 提取文案：按钮选择或桌面拖入视频，显示进度并把识别结果放入文本框，可保存为 TXT。
-2. 洗稿：分别显示原稿和清洗稿，只有点击“洗稿”才处理。
-3. 改稿：选择 `0.5`、`0.75`、`1.0`、`1.5` 或 `2.0` 倍，点击“离线规则改写”后生成结果。
-4. 文本转语音：可继续编辑文本、选择 Windows 本地声优、生成带时间戳的 MP3 并另存。
+1. **提取文案**：选择或从桌面拖入视频，显示处理进度，并将识别结果放入文本框，可保存为 TXT。
+2. **洗稿**：上方显示原稿，下方显示清洗稿；只有点击“洗稿”才开始处理。
+3. **改稿**：选择目标倍率，点击“离线规则改写”后生成结果。
+4. **文本转语音**：编辑文本、选择 Windows 本地声优，生成带时间戳文件名的 MP3 并另存。
 
-提取文案必须使用 `faster-whisper`。程序不会使用 Windows 语音命令识别器冒充视频转写；识别引擎或模型未就绪时会明确停止并报错，不会显示不可信的文案。
+## 离线语音识别模型
 
-## 从源码运行测试
+提取文案使用 `faster-whisper`，不会使用不适合视频转写的 Windows 语音命令识别器。
+
+模型必须保存在：
+
+```text
+E:\pj\video-script-studio\models\faster-whisper-small
+```
+
+该目录至少应包含：
+
+```text
+config.json
+model.bin
+tokenizer.json
+vocabulary.txt
+```
+
+模型文件不提交到 Git。运行 EXE 时请保留项目中的 `models` 目录及以上文件。
+
+## 运行测试
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
