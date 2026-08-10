@@ -26,6 +26,7 @@ if (-not (Test-Path -LiteralPath $python)) {
     --collect-all soundfile `
     --collect-all jieba `
     --collect-all ordered_set `
+    --collect-data language_tags `
     src/video_script_studio/portable_app.py
 
 Write-Host "Build complete: $projectRoot\dist\VideoScriptStudio.exe"
