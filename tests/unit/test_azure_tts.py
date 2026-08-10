@@ -18,9 +18,11 @@ def test_azure_request_retries_direct_when_stale_proxy_fails(monkeypatch) -> Non
     class DirectOpener:
         def open(self, request, timeout=60):
             assert request.full_url.startswith("https://eastasia.")
+            assert request.host == "eastasia.tts.speech.microsoft.com"
             return Response()
 
-    def stale_proxy(*_args, **_kwargs):
+    def stale_proxy(request, **_kwargs):
+        request.set_proxy("127.0.0.1:1080", "https")
         raise urllib.error.URLError("proxy refused connection")
 
     monkeypatch.setattr("urllib.request.urlopen", stale_proxy)

@@ -29,6 +29,13 @@ class AzureTTSService:
 
     @staticmethod
     def _request(request: urllib.request.Request, timeout: int = 60) -> bytes:
+        # Keep an untouched copy: ProxyHandler mutates the original Request in-place.
+        direct_request = urllib.request.Request(
+            request.full_url,
+            data=request.data,
+            headers=dict(request.header_items()),
+            method=request.get_method(),
+        )
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return response.read()
@@ -42,7 +49,7 @@ class AzureTTSService:
             # Retry once without any proxy before reporting a network failure.
             try:
                 direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                with direct.open(request, timeout=timeout) as response:
+                with direct.open(direct_request, timeout=timeout) as response:
                     return response.read()
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace").strip()
