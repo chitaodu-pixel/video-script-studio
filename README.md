@@ -42,6 +42,8 @@ E:\pj\video-script-studio\models\kokoro-v1.1-zh
 
 转语音生成的临时试听统一保存在当前项目的 `tts\previews` 文件夹。点击“保存 MP3”另存的文件不会被“清除全部试听”删除。
 
+未手动选择项目时，软件会在 EXE 所在目录的 `projects` 文件夹创建项目。例如 EXE 位于 `E:\pj\video-script-studio\dist`，自动项目将保存在 `E:\pj\video-script-studio\dist\projects`，不会再默认写入C盘“文档”目录。
+
 ## 离线语音识别模型
 
 提取文案使用 `faster-whisper`，不会使用不适合视频转写的 Windows 语音命令识别器。

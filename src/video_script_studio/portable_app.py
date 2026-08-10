@@ -26,12 +26,19 @@ from video_script_studio.services.transcription import TranscriptionService
 from video_script_studio.services.windows_tts import WindowsTTSService
 
 
+def resolve_app_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
 class PortableApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("VideoScript Studio - 视频文案工作台")
         self.geometry("1100x760")
         self.minsize(900, 650)
+        self.app_root = resolve_app_root()
         self.store = ProjectStore()
         self.media = MediaService()
         self.transcriber = TranscriptionService()
@@ -292,7 +299,7 @@ class PortableApp(TkinterDnD.Tk):
     def _ensure_project(self) -> bool:
         if self.project and self.project_root:
             return True
-        base = Path.home() / "Documents" / "VideoScriptStudioProjects"
+        base = self.app_root / "projects"
         base.mkdir(parents=True, exist_ok=True)
         root = base / datetime.now().strftime("项目-%Y%m%d-%H%M%S")
         try:
@@ -395,7 +402,7 @@ class PortableApp(TkinterDnD.Tk):
         threading.Thread(target=work, daemon=True, name="video-transcription").start()
 
     def _write_error_log(self, exc: Exception) -> None:
-        root = self.project_root or Path.home() / "Documents" / "VideoScriptStudioProjects"
+        root = self.project_root or self.app_root / "projects"
         path = root / "logs" / "app.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -659,6 +666,9 @@ class PortableApp(TkinterDnD.Tk):
 
 
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--path-self-test":
+        Path(sys.argv[2]).write_text(str(resolve_app_root()), encoding="utf-8")
+        return 0
     if len(sys.argv) == 3 and sys.argv[1] == "--credential-self-test":
         try:
             store = AzureCredentialStore(Path(sys.argv[2]))
