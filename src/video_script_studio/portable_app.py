@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import ctypes
+import queue
+import shutil
 import threading
+import traceback
 import tkinter as tk
-from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+
+from tkinterdnd2 import DND_FILES, TkinterDnD
 
 from video_script_studio.services.exporter import export_text
 from video_script_studio.services.media import SUPPORTED_VIDEO_EXTENSIONS, MediaService
@@ -16,11 +19,8 @@ from video_script_studio.services.text_cleaner import clean_text
 from video_script_studio.services.transcription import TranscriptionService
 from video_script_studio.services.windows_tts import WindowsTTSService
 
-WM_DROPFILES = 0x0233
-GWLP_WNDPROC = -4
 
-
-class PortableApp(tk.Tk):
+class PortableApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("VideoScript Studio - 视频文案工作台")
@@ -33,13 +33,13 @@ class PortableApp(tk.Tk):
         self.project = None
         self.project_root: Path | None = None
         self.selected_video: Path | None = None
+        self.generated_audio: Path | None = None
         self.status = tk.StringVar(value="准备就绪。")
         self.ratio = tk.StringVar(value="1.0")
         self.voice = tk.StringVar()
-        self._drop_callback = None
-        self._original_wndproc = None
+        self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self._build()
-        self.after(250, self._enable_windows_drop)
+        self.after(100, self._poll_events)
         self.after(300, self._load_voices)
 
     def _build(self) -> None:
@@ -59,7 +59,6 @@ class PortableApp(tk.Tk):
         self._build_wash_tab()
         self._build_rewrite_tab()
         self._build_tts_tab()
-
         ttk.Label(self, textvariable=self.status, relief="sunken", anchor="w", padding=6).pack(
             fill="x", padx=12, pady=(0, 10)
         )
@@ -69,13 +68,18 @@ class PortableApp(tk.Tk):
         self.notebook.add(tab, text="1  提取文案")
         self.drop_area = ttk.Label(
             tab,
-            text="将视频拖到这里\n或点击“导入视频文件”\n支持 MP4 / MOV / MKV / AVI / M4V",
+            text="将视频文件拖到这里\n或点击“导入视频文件”\n支持 MP4 / MOV / MKV / AVI / M4V",
             anchor="center",
             relief="groove",
             padding=28,
         )
         self.drop_area.pack(fill="x")
-        ttk.Button(tab, text="导入视频文件", command=self.choose_video).pack(pady=8)
+        self.drop_area.drop_target_register(DND_FILES)
+        self.drop_area.dnd_bind("<<DropEnter>>", self._drop_enter)
+        self.drop_area.dnd_bind("<<DropLeave>>", self._drop_leave)
+        self.drop_area.dnd_bind("<<Drop>>", self._drop_video)
+        self.import_button = ttk.Button(tab, text="导入视频文件", command=self.choose_video)
+        self.import_button.pack(pady=8)
         self.extract_progress = ttk.Progressbar(tab, maximum=100)
         self.extract_progress.pack(fill="x", pady=(2, 8))
         self.extract_text = self._add_text_box(tab, "提取结果")
@@ -128,12 +132,9 @@ class PortableApp(tk.Tk):
         self.voice_combo = ttk.Combobox(controls, textvariable=self.voice, state="readonly", width=38)
         self.voice_combo.pack(side="left", padx=8)
         ttk.Button(controls, text="刷新声优", command=self._load_voices).pack(side="left")
-        ttk.Button(controls, text="转语音", style="Step.TButton", command=self.run_tts).pack(
-            side="right"
-        )
+        ttk.Button(controls, text="转语音", style="Step.TButton", command=self.run_tts).pack(side="right")
         self.tts_progress = ttk.Progressbar(tab, maximum=100)
         self.tts_progress.pack(fill="x", pady=8)
-        self.generated_audio: Path | None = None
         self.audio_label = ttk.Label(tab, text="尚未生成 MP3")
         self.audio_label.pack(anchor="w")
         ttk.Button(tab, text="保存 MP3", command=self.save_audio).pack(anchor="e", pady=8)
@@ -150,44 +151,44 @@ class PortableApp(tk.Tk):
         scrollbar.pack(side="right", fill="y")
         return text
 
-    def _enable_windows_drop(self) -> None:
-        if not hasattr(ctypes, "windll"):
-            return
-        hwnd = self.winfo_id()
-        shell32 = ctypes.windll.shell32
-        user32 = ctypes.windll.user32
-        shell32.DragAcceptFiles(hwnd, True)
-        callback_type = ctypes.WINFUNCTYPE(
-            ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
-        )
-        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
-        user32.GetWindowLongPtrW.restype = ctypes.c_void_p
-        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
-        user32.SetWindowLongPtrW.restype = ctypes.c_void_p
-        user32.CallWindowProcW.argtypes = [
-            ctypes.c_void_p,
-            wintypes.HWND,
-            wintypes.UINT,
-            wintypes.WPARAM,
-            wintypes.LPARAM,
-        ]
-        user32.CallWindowProcW.restype = ctypes.c_longlong
-        original = user32.GetWindowLongPtrW(hwnd, GWLP_WNDPROC)
-        self._original_wndproc = original
+    def _drop_enter(self, event):
+        self.drop_area.configure(text="松开鼠标即可导入视频")
+        return event.action
 
-        @callback_type
-        def wndproc(window, message, wparam, lparam):
-            if message == WM_DROPFILES:
-                length = shell32.DragQueryFileW(wparam, 0, None, 0)
-                buffer = ctypes.create_unicode_buffer(length + 1)
-                shell32.DragQueryFileW(wparam, 0, buffer, length + 1)
-                shell32.DragFinish(wparam)
-                self.after(0, lambda path=buffer.value: self.start_extraction(Path(path)))
-                return 0
-            return user32.CallWindowProcW(original, window, message, wparam, lparam)
+    def _drop_leave(self, event):
+        if not self.selected_video:
+            self.drop_area.configure(text="将视频文件拖到这里\n支持 MP4 / MOV / MKV / AVI / M4V")
+        return event.action
 
-        self._drop_callback = wndproc
-        user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, ctypes.cast(wndproc, ctypes.c_void_p))
+    def _drop_video(self, event):
+        paths = [Path(item) for item in self.tk.splitlist(event.data)]
+        if paths:
+            self.start_extraction(paths[0])
+        return event.action
+
+    def _poll_events(self) -> None:
+        try:
+            while True:
+                kind, payload = self.events.get_nowait()
+                if kind == "audio_ready":
+                    self.status.set("正在加载本地 Whisper 模型，请稍候……")
+                elif kind == "progress":
+                    if str(self.extract_progress["mode"]) != "determinate":
+                        self.extract_progress.stop()
+                        self.extract_progress.configure(mode="determinate")
+                    self.extract_progress.configure(value=20 + int(payload) * 0.8)
+                    self.status.set(f"正在使用 CPU 识别视频文案…… {int(payload)}%")
+                elif kind == "extract_done":
+                    self._extraction_finished(str(payload))
+                elif kind == "extract_error":
+                    self._extraction_failed(str(payload))
+                elif kind == "tts_done":
+                    self._tts_finished(Path(str(payload)))
+                elif kind == "tts_error":
+                    self._tts_failed(str(payload))
+        except queue.Empty:
+            pass
+        self.after(100, self._poll_events)
 
     def _ensure_project(self) -> bool:
         if self.project and self.project_root:
@@ -258,24 +259,26 @@ class PortableApp(tk.Tk):
         if source.suffix.lower() not in SUPPORTED_VIDEO_EXTENSIONS:
             messagebox.showwarning("不支持的文件", f"不支持 {source.suffix} 格式。", parent=self)
             return
+        if not source.is_file():
+            messagebox.showerror("文件不存在", str(source), parent=self)
+            return
         if not self._ensure_project():
             return
         self.selected_video = source
+        self.import_button.configure(state="disabled")
         self.drop_area.configure(text=f"已导入：{source.name}\n正在提取文案……")
-        self.extract_progress.configure(value=2)
+        self.extract_progress.configure(mode="indeterminate", value=0)
+        self.extract_progress.start(12)
         self.status.set("正在从视频提取音频……")
         audio = self.project_root / "audio" / "source.wav"
 
         def work() -> None:
             try:
                 self.media.extract_wav(source, audio)
-                self.after(0, lambda: self.extract_progress.configure(value=20))
-                self.after(0, lambda: self.status.set("正在使用 CPU 识别视频文案……"))
-
-                def progress(value: int) -> None:
-                    self.after(0, lambda v=value: self.extract_progress.configure(value=20 + v * 0.8))
-
-                segments = self.transcriber.transcribe(audio, "small", "zh", progress)
+                self.events.put(("audio_ready", None))
+                segments = self.transcriber.transcribe(
+                    audio, "small", "zh", lambda value: self.events.put(("progress", value))
+                )
                 self.transcriber.save_segments(
                     self.project_root / "transcript" / "raw_segments.json", segments
                 )
@@ -285,34 +288,46 @@ class PortableApp(tk.Tk):
                 self.project.stage_status["transcription"] = "completed"
                 self.store.save(self.project_root, self.project)
             except Exception as exc:
-                self.after(0, lambda: self._extraction_failed(str(exc)))
+                self._write_error_log(exc)
+                self.events.put(("extract_error", f"{type(exc).__name__}: {exc}"))
                 return
-            self.after(0, lambda: self._extraction_finished(text))
+            self.events.put(("extract_done", text))
 
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=work, daemon=True, name="video-transcription").start()
+
+    def _write_error_log(self, exc: Exception) -> None:
+        root = self.project_root or Path.home() / "Documents" / "VideoScriptStudioProjects"
+        path = root / "logs" / "app.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n[{datetime.now().isoformat(timespec='seconds')}] {type(exc).__name__}: {exc}\n")
+            handle.write(traceback.format_exc())
 
     def _extraction_failed(self, message: str) -> None:
-        self.extract_progress.configure(value=0)
+        self.extract_progress.stop()
+        self.extract_progress.configure(mode="determinate", value=0)
+        self.import_button.configure(state="normal")
         self.status.set("文案提取失败。")
         messagebox.showerror(
             "文案提取失败",
-            f"{message}\n\n程序不会再使用低质量的 Windows 语音识别结果代替 Whisper。",
+            f"{message}\n\n错误详情已保存到当前项目的 logs\\app.log。",
             parent=self,
         )
 
     def _extraction_finished(self, text: str) -> None:
-        self.extract_progress.configure(value=100)
+        self.extract_progress.stop()
+        self.extract_progress.configure(mode="determinate", value=100)
+        self.import_button.configure(state="normal")
         self._set_widget(self.extract_text, text)
         self.drop_area.configure(text=f"已完成：{self.selected_video.name}")
         self.status.set(f"文案提取完成，共 {count_effective_characters(text)} 字。")
 
     def save_extract(self) -> None:
-        text = self.extract_text.get("1.0", "end-1c")
         destination = filedialog.asksaveasfilename(
             title="保存提取文案", defaultextension=".txt", filetypes=[("文本", "*.txt")], parent=self
         )
         if destination:
-            export_text(Path(destination), text)
+            export_text(Path(destination), self.extract_text.get("1.0", "end-1c"))
             self.status.set(f"提取文案已保存：{destination}")
 
     def to_wash(self) -> None:
@@ -320,8 +335,7 @@ class PortableApp(tk.Tk):
         self.notebook.select(1)
 
     def run_wash(self) -> None:
-        source = self.wash_original.get("1.0", "end-1c")
-        result = clean_text(source)
+        result = clean_text(self.wash_original.get("1.0", "end-1c"))
         self._set_widget(self.wash_result, result)
         if self._ensure_project():
             export_text(self.project_root / "transcript" / "cleaned.txt", result)
@@ -332,8 +346,7 @@ class PortableApp(tk.Tk):
         self.notebook.select(2)
 
     def run_rewrite(self) -> None:
-        source = self.rewrite_source.get("1.0", "end-1c")
-        result = rewrite(source, float(self.ratio.get()))
+        result = rewrite(self.rewrite_source.get("1.0", "end-1c"), float(self.ratio.get()))
         self._set_widget(self.rewrite_result, result.text)
         self.rewrite_count.configure(
             text=f"原文 {result.source_count} / 目标 {result.target_count} / 实际 {result.actual_count}"
@@ -363,21 +376,20 @@ class PortableApp(tk.Tk):
         if not text:
             messagebox.showinfo("没有文本", "请先填写配音文本。", parent=self)
             return
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        destination = self.project_root / "tts" / f"配音-{timestamp}.mp3"
-        self.tts_progress.configure(value=5)
+        destination = self.project_root / "tts" / f"配音-{datetime.now():%Y%m%d-%H%M%S}.mp3"
+        self.tts_progress.configure(value=10)
         self.status.set("正在转换语音……")
 
         def work() -> None:
             try:
-                self.after(0, lambda: self.tts_progress.configure(value=20))
                 self.tts.synthesize_mp3(text, destination, self.voice.get())
             except Exception as exc:
-                self.after(0, lambda: self._tts_failed(str(exc)))
+                self._write_error_log(exc)
+                self.events.put(("tts_error", f"{type(exc).__name__}: {exc}"))
                 return
-            self.after(0, lambda: self._tts_finished(destination))
+            self.events.put(("tts_done", str(destination)))
 
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=work, daemon=True, name="text-to-speech").start()
 
     def _tts_failed(self, message: str) -> None:
         self.tts_progress.configure(value=0)
@@ -402,7 +414,7 @@ class PortableApp(tk.Tk):
             parent=self,
         )
         if destination:
-            Path(destination).write_bytes(self.generated_audio.read_bytes())
+            shutil.copy2(self.generated_audio, destination)
             self.status.set(f"MP3 已保存：{destination}")
 
 

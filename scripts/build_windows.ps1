@@ -19,6 +19,7 @@ if (-not (Test-Path -LiteralPath $python)) {
     --collect-all ctranslate2 `
     --collect-all av `
     --collect-all tokenizers `
+    --collect-all tkinterdnd2 `
     src/video_script_studio/portable_app.py
 
 Write-Host "Build complete: $projectRoot\dist\VideoScriptStudio.exe"
