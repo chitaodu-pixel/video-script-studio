@@ -17,6 +17,8 @@ QUESTION_HINTS = ("吗", "呢", "么", "为什么", "怎么", "是否", "是不�
 def _normalize_asr_punctuation(text: str) -> str:
     table = str.maketrans({",": "，", ".": "。", "!": "！", "?": "？", ";": "；", ":": "："})
     text = text.translate(table)
+    # A dot between digits is a decimal point, not a sentence ending.
+    text = re.sub(r"(?<=\d)。(?=\d)", ".", text)
     text = "".join(text.split())
     return re.sub(r"([，。！？；：、])\1+", r"\1", text)
 

@@ -77,6 +77,8 @@ class WashResult:
 
 def clean_text(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Repair decimal points that may have been mistaken for Chinese full stops.
+    text = re.sub(r"(?<=\d)。(?=\d)", ".", text)
     text = FILLER_PATTERN.sub("", text)
     text = PUNCTUATION_PATTERN.sub(r"\1", text)
     text = SPACE_PATTERN.sub(" ", text)

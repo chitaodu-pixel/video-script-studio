@@ -32,6 +32,12 @@ def test_format_transcript_restores_chinese_punctuation_and_questions() -> None:
     assert format_transcript_text(segments) == "你知道为什么吗？\n因为这个方法，非常重要。"
 
 
+def test_format_transcript_preserves_decimal_points() -> None:
+    segments = [TranscriptSegment(0, 1, "这款产品卖了1.4万件.")]
+
+    assert format_transcript_text(segments) == "这款产品卖了1.4万件。"
+
+
 def test_resolve_model_uses_configured_local_directory(monkeypatch, tmp_path) -> None:
     model = tmp_path / "model"
     model.mkdir()
