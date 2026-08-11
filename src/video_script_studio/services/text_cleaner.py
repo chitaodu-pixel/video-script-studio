@@ -48,6 +48,24 @@ PHRASE_REPLACEMENTS = (
     ("非常", "十分"),
 )
 
+STRONG_REPLACEMENTS = (
+    ("我们", "咱们"),
+    ("大家", "各位"),
+    ("想要", "要想"),
+    ("很多", "不少"),
+    ("重要", "关键"),
+    ("方法", "办法"),
+    ("问题", "情况"),
+    ("发现", "看出"),
+)
+
+GENTLE_REPLACEMENTS = (
+    ("可以", "能够"),
+    ("使用", "采用"),
+    ("但是", "不过"),
+    ("因为", "由于"),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class WashResult:
@@ -79,39 +97,53 @@ def _replace_counted(text: str, replacements: tuple[tuple[str, str], ...]) -> tu
 
 def _rewrite_sentence(sentence: str, relatedness: int = 70) -> tuple[str, int]:
     original = sentence
-    sentence = re.sub(
-        r"^因为(.+?)[，,]所以(.+?)([。！？!?]?)$",
-        r"\2，之所以如此，是由于\1\3",
-        sentence,
+    gentle_count = {90: 1, 80: 2, 70: 3, 60: 4, 50: 4}[relatedness]
+    sentence, gentle_count_applied = _replace_counted(
+        sentence, GENTLE_REPLACEMENTS[:gentle_count]
     )
-    sentence = re.sub(
-        r"^虽然(.+?)[，,](?:但是|但)(.+?)([。！？!?]?)$",
-        r"尽管\1，\2\3",
-        sentence,
-    )
-    sentence = re.sub(
-        r"^如果(.+?)[，,](?:那么|就)(.+?)([。！？!?]?)$",
-        r"要想\2，前提是\1\3",
-        sentence,
-    )
-    sentence = re.sub(
-        r"^通过(.+?)[，,]可以(.+?)([。！？!?]?)$",
-        r"借助\1，便能\2\3",
-        sentence,
-    )
-    sentence = re.sub(
-        r"^(.+?)不仅(.+?)[，,]而且(.+?)([。！？!?]?)$",
-        r"\1既\2，也\3\4",
-        sentence,
-    )
-    sentence = re.sub(r"^(?:首先|第一)[，,]", "先来看，", sentence)
-    sentence = re.sub(r"^(?:其次|第二)[，,]", "接着来看，", sentence)
-    sentence = re.sub(r"^(?:最后|最终)[，,]", "到最后，", sentence)
+    # Sentence restructuring is deliberately reserved for 70% and below.
+    # Previously it ran at every setting, making 90% look the same as 70%.
+    if relatedness <= 70:
+        sentence = re.sub(
+            r"^因为(.+?)[，,]所以(.+?)([。！？!?]?)$",
+            r"\2，之所以如此，是由于\1\3",
+            sentence,
+        )
+        sentence = re.sub(
+            r"^虽然(.+?)[，,](?:但是|但)(.+?)([。！？!?]?)$",
+            r"尽管\1，\2\3",
+            sentence,
+        )
+        sentence = re.sub(
+            r"^如果(.+?)[，,](?:那么|就)(.+?)([。！？!?]?)$",
+            r"要想\2，前提是\1\3",
+            sentence,
+        )
+        sentence = re.sub(
+            r"^通过(.+?)[，,]可以(.+?)([。！？!?]?)$",
+            r"借助\1，便能\2\3",
+            sentence,
+        )
+        sentence = re.sub(
+            r"^(.+?)不仅(.+?)[，,]而且(.+?)([。！？!?]?)$",
+            r"\1既\2，也\3\4",
+            sentence,
+        )
+        sentence = re.sub(r"^(?:首先|第一)[，,]", "先来看，", sentence)
+        sentence = re.sub(r"^(?:其次|第二)[，,]", "接着来看，", sentence)
+        sentence = re.sub(r"^(?:最后|最终)[，,]", "到最后，", sentence)
     # Lower relatedness means a broader set of phrases may be replaced.
     replacement_share = {90: 0.25, 80: 0.5, 70: 1.0, 60: 1.0, 50: 1.0}[relatedness]
     replacement_count = max(1, round(len(PHRASE_REPLACEMENTS) * replacement_share))
     sentence, phrase_count = _replace_counted(sentence, PHRASE_REPLACEMENTS[:replacement_count])
-    return sentence, phrase_count + int(sentence != original and phrase_count == 0)
+    if relatedness <= 60:
+        strong_count = 4 if relatedness == 60 else len(STRONG_REPLACEMENTS)
+        sentence, strong_count_applied = _replace_counted(
+            sentence, STRONG_REPLACEMENTS[:strong_count]
+        )
+        phrase_count += strong_count_applied
+    total_count = phrase_count + gentle_count_applied
+    return sentence, total_count + int(sentence != original and total_count == 0)
 
 
 def _ngram_similarity(left: str, right: str, size: int = 4) -> float:

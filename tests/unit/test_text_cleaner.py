@@ -32,10 +32,12 @@ def test_wash_document_corrects_asr_error_and_restructures_sentence() -> None:
 
 
 def test_relatedness_controls_replacement_scope() -> None:
-    source = "这个方法可以使用，这种方式非常方便。"
+    source = "因为我们想要使用这个重要方法，所以大家可以发现很多问题。"
 
-    conservative = wash_document(source, 90)
-    stronger = wash_document(source, 70)
+    results = {level: wash_document(source, level) for level in (90, 80, 70, 60, 50)}
 
-    assert conservative.text != stronger.text
-    assert stronger.rewrite_count > conservative.rewrite_count
+    assert results[90].text != results[70].text
+    assert results[90].text != results[80].text
+    assert results[70].text != results[60].text
+    assert results[60].text != results[50].text
+    assert results[90].similarity > results[70].similarity > results[50].similarity

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Callable
@@ -10,6 +11,21 @@ from video_script_studio.domain.models import TranscriptSegment
 
 
 SENTENCE_ENDINGS = ("。", "！", "？", "!", "?", "；", ";")
+QUESTION_HINTS = ("吗", "呢", "么", "为什么", "怎么", "是否", "是不是", "哪里", "多少", "谁")
+
+
+def _normalize_asr_punctuation(text: str) -> str:
+    table = str.maketrans({",": "，", ".": "。", "!": "！", "?": "？", ";": "；", ":": "："})
+    text = text.translate(table)
+    text = "".join(text.split())
+    return re.sub(r"([，。！？；：、])\1+", r"\1", text)
+
+
+def _terminal_punctuation(text: str) -> str:
+    content = text.rstrip("，、：；")
+    if any(hint in content[-8:] for hint in QUESTION_HINTS):
+        return "？"
+    return "。"
 
 
 def format_transcript_text(
@@ -18,22 +34,27 @@ def format_transcript_text(
     """Turn ASR fragments into readable, content-aware lines."""
     lines: list[str] = []
     current = ""
-    previous_end: float | None = None
-    for segment in segments:
-        fragment = segment.text.strip()
+    for index, segment in enumerate(segments):
+        fragment = _normalize_asr_punctuation(segment.text)
         if not fragment:
             continue
-        long_pause = previous_end is not None and segment.start - previous_end >= 1.2
-        if current and long_pause:
-            lines.append(current)
+        if current and len(current) + len(fragment) > max_line_characters:
+            lines.append(current.rstrip("，、：；") + "，")
             current = ""
         current += fragment
-        previous_end = segment.end
-        if fragment.endswith(SENTENCE_ENDINGS) or len(current) >= max_line_characters:
+        next_segment = segments[index + 1] if index + 1 < len(segments) else None
+        pause = max(0.0, next_segment.start - segment.end) if next_segment else 99.0
+        has_ending = current.endswith(SENTENCE_ENDINGS)
+        if not has_ending and (pause >= 1.0 or next_segment is None):
+            current = current.rstrip("，、：；") + _terminal_punctuation(current)
+            has_ending = True
+        elif not has_ending and (pause >= 0.35 or len(current) >= 22):
+            current = current.rstrip("，、：；") + "，"
+        if has_ending or (len(current) >= max_line_characters and current.endswith("，")):
             lines.append(current)
             current = ""
     if current:
-        lines.append(current)
+        lines.append(current.rstrip("，、：；") + _terminal_punctuation(current))
     return "\n".join(lines)
 
 

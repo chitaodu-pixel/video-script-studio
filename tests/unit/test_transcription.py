@@ -13,13 +13,23 @@ def test_format_transcript_uses_sentences_pauses_and_line_length() -> None:
         TranscriptSegment(3.5, 4, "停顿后另起一行"),
     ]
 
-    assert format_transcript_text(segments) == "第一句话。\n第二句没有标点\n停顿后另起一行"
+    assert format_transcript_text(segments) == "第一句话。\n第二句没有标点。\n停顿后另起一行。"
 
 
 def test_format_transcript_wraps_long_unpunctuated_content() -> None:
     segments = [TranscriptSegment(0, 1, "一" * 25), TranscriptSegment(1, 2, "二" * 25)]
 
-    assert format_transcript_text(segments, max_line_characters=45) == "一" * 25 + "二" * 25
+    assert format_transcript_text(segments, max_line_characters=45) == "一" * 25 + "，\n" + "二" * 25 + "。"
+
+
+def test_format_transcript_restores_chinese_punctuation_and_questions() -> None:
+    segments = [
+        TranscriptSegment(0, 1, "你知道为什么吗?"),
+        TranscriptSegment(1.1, 2, "因为这个方法"),
+        TranscriptSegment(2.5, 3, "非常重要"),
+    ]
+
+    assert format_transcript_text(segments) == "你知道为什么吗？\n因为这个方法，非常重要。"
 
 
 def test_resolve_model_uses_configured_local_directory(monkeypatch, tmp_path) -> None:

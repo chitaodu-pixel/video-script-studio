@@ -126,7 +126,7 @@ class PortableApp(TkinterDnD.Tk):
         self.wash_original = self._add_text_box(tab, "原稿", height=9)
         wash_controls = ttk.Frame(tab)
         wash_controls.pack(pady=7)
-        ttk.Label(wash_controls, text="相关度（越低改动越大）").pack(side="left")
+        ttk.Label(wash_controls, text="保留相关度（越低改动越大）").pack(side="left")
         ttk.Combobox(
             wash_controls,
             textvariable=self.wash_relatedness,
@@ -473,10 +473,9 @@ class PortableApp(TkinterDnD.Tk):
         self._set_widget(self.wash_result, result)
         if self._ensure_project():
             export_text(self.project_root / "transcript" / "cleaned.txt", result)
-        similarity = round(wash.similarity * 100)
         self.status.set(
-            f"洗稿完成：校正 {wash.correction_count} 处，改写 {wash.rewrite_count} 处，"
-            f"选择相关度 {relatedness}%，结果文字相似度约 {similarity}%；请人工复核专有名词。"
+            f"已按 {relatedness}% 保留相关度完成洗稿：校正 {wash.correction_count} 处，"
+            f"改写 {wash.rewrite_count} 处；请人工复核专有名词。"
         )
 
     def to_rewrite(self) -> None:
