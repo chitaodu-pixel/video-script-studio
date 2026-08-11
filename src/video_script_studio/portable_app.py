@@ -158,22 +158,30 @@ class PortableApp(TkinterDnD.Tk):
         controls = ttk.Frame(tab)
         controls.pack(fill="x", pady=8)
         ttk.Label(controls, text="配音引擎").pack(side="left")
-        engine_combo = ttk.Combobox(
+        self.engine_combo = ttk.Combobox(
             controls,
             textvariable=self.tts_engine,
             values=("离线神经中文", "Windows 本地", "Azure 在线神经"),
             state="readonly",
             width=16,
         )
-        engine_combo.pack(side="left", padx=(8, 18))
-        engine_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_tts_engine_changed())
+        self.engine_combo.pack(side="left", padx=(8, 18))
+        self.engine_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_tts_engine_changed())
         ttk.Label(controls, text="声优").pack(side="left")
         ttk.Button(controls, text="转语音", style="Step.TButton", command=self.run_tts).pack(side="right")
-        ttk.Button(controls, text="刷新声优", command=self._load_voices).pack(
-            side="right", padx=(8, 6)
+        self.refresh_voices_button = ttk.Button(
+            controls, text="刷新声优", command=self._load_voices
         )
+        self.refresh_voices_button.pack(side="right", padx=(8, 6))
         self.voice_combo = ttk.Combobox(controls, textvariable=self.voice, state="readonly")
         self.voice_combo.pack(side="left", padx=(8, 0), fill="x", expand=True)
+
+        voice_loading = ttk.Frame(tab)
+        voice_loading.pack(fill="x", pady=(0, 8))
+        self.voice_load_progress = ttk.Progressbar(voice_loading, mode="determinate", maximum=100)
+        self.voice_load_progress.pack(side="left", fill="x", expand=True)
+        self.voice_load_label = ttk.Label(voice_loading, text="声优尚未加载", width=28)
+        self.voice_load_label.pack(side="left", padx=(10, 0))
 
         online = ttk.LabelFrame(tab, text="在线神经声优设置（仅 Azure 模式需要）", padding=8)
         online.pack(fill="x", pady=(0, 8))
@@ -291,8 +299,7 @@ class PortableApp(TkinterDnD.Tk):
                 elif kind == "voices_done":
                     self._voices_loaded(payload)
                 elif kind == "voices_error":
-                    self.status.set(f"无法读取声优：{payload}")
-                    messagebox.showerror("无法刷新声优", str(payload), parent=self)
+                    self._voices_failed(str(payload))
         except queue.Empty:
             pass
         self.after(100, self._poll_events)
@@ -473,6 +480,8 @@ class PortableApp(TkinterDnD.Tk):
         self.notebook.select(3)
 
     def _load_voices(self) -> None:
+        if str(self.refresh_voices_button["state"]) == "disabled":
+            return
         engine = self.tts_engine.get()
         key = self.azure_key.get()
         region = self.azure_region.get()
@@ -481,23 +490,38 @@ class PortableApp(TkinterDnD.Tk):
             return
         if engine == "Azure 在线神经":
             self._save_azure_credentials()
+        self.refresh_voices_button.configure(state="disabled", text="正在加载…")
+        self.engine_combo.configure(state="disabled")
+        self.voice_combo.configure(state="disabled")
+        self.voice_load_progress.configure(mode="indeterminate", value=0)
+        self.voice_load_progress.start(12)
+        self.voice_load_label.configure(text="正在加载声优，请稍候…")
         self.status.set(f"正在读取{engine}声优……")
 
         def work() -> None:
             try:
+                used_cache = False
                 if engine == "Azure 在线神经":
-                    voices = self.azure_tts.voices(key, region)
+                    try:
+                        voices = self.azure_tts.voices(key, region)
+                        self.azure_tts.save_cached_voices(voices)
+                    except Exception:
+                        voices = self.azure_tts.cached_voices()
+                        if not voices:
+                            raise
+                        used_cache = True
                     values = [(item.display_name, item) for item in voices]
                 elif engine == "离线神经中文":
                     voices = self.kokoro_tts.voices()
                     values = [(item.display_name, item) for item in voices]
                 else:
                     values = [(item, item) for item in self.tts.voices()]
+                    used_cache = False
             except Exception as exc:
                 self._write_error_log(exc)
                 self.events.put(("voices_error", f"{type(exc).__name__}: {exc}"))
                 return
-            self.events.put(("voices_done", (engine, values)))
+            self.events.put(("voices_done", (engine, values, used_cache)))
 
         threading.Thread(target=work, daemon=True, name="load-tts-voices").start()
 
@@ -515,14 +539,33 @@ class PortableApp(TkinterDnD.Tk):
             messagebox.showerror("无法保存密钥", str(exc), parent=self)
 
     def _voices_loaded(self, payload) -> None:
-        engine, values = payload
+        engine, values, used_cache = payload
+        self._finish_voice_loading(success=True)
         if engine != self.tts_engine.get():
             return
         self.voice_values = dict(values)
         names = list(self.voice_values)
         self.voice_combo.configure(values=names)
         self.voice.set(names[0] if names else "")
-        self.status.set(f"已读取 {len(names)} 个{engine}声优。")
+        if used_cache:
+            message = f"网络不稳定，已读取本地缓存的 {len(names)} 个{engine}声优。"
+        else:
+            message = f"已读取 {len(names)} 个{engine}声优。"
+        self.voice_load_label.configure(text=message)
+        self.status.set(message)
+
+    def _finish_voice_loading(self, success: bool) -> None:
+        self.voice_load_progress.stop()
+        self.voice_load_progress.configure(mode="determinate", value=100 if success else 0)
+        self.refresh_voices_button.configure(state="normal", text="刷新声优")
+        self.engine_combo.configure(state="readonly")
+        self.voice_combo.configure(state="readonly")
+
+    def _voices_failed(self, error: str) -> None:
+        self._finish_voice_loading(success=False)
+        self.voice_load_label.configure(text="声优加载失败，可重新刷新")
+        self.status.set(f"无法读取声优：{error}")
+        messagebox.showerror("无法刷新声优", error, parent=self)
 
     def _on_tts_engine_changed(self) -> None:
         self.voice.set("")

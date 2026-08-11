@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -20,6 +21,38 @@ class AzureVoice:
 
 class AzureTTSService:
     """Microsoft Azure neural TTS through the official REST endpoints."""
+
+    def __init__(self, cache_path: Path | None = None) -> None:
+        app_data = Path(os.environ.get("APPDATA", Path.home())) / "VideoScriptStudio"
+        self.cache_path = cache_path or app_data / "azure-voices.json"
+
+    def save_cached_voices(self, voices: list[AzureVoice]) -> None:
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = [
+            {
+                "display_name": voice.display_name,
+                "short_name": voice.short_name,
+                "locale": voice.locale,
+            }
+            for voice in voices
+        ]
+        self.cache_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    def cached_voices(self) -> list[AzureVoice]:
+        try:
+            payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
+            voices = [
+                AzureVoice(
+                    str(item["display_name"]),
+                    str(item["short_name"]),
+                    str(item["locale"]),
+                )
+                for item in payload
+                if item.get("display_name") and item.get("short_name") and item.get("locale")
+            ]
+            return voices
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return []
 
     @staticmethod
     def _endpoint(region: str, path: str) -> str:

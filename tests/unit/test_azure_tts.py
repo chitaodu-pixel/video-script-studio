@@ -91,6 +91,23 @@ def test_azure_voice_list_keeps_chinese_neural_voices(monkeypatch) -> None:
     assert "女声" in voices[0].display_name
 
 
+def test_azure_voice_cache_round_trip(tmp_path) -> None:
+    service = AzureTTSService(tmp_path / "voices.json")
+    expected = [AzureVoice("晓晓（女声）", "zh-CN-XiaoxiaoNeural", "zh-CN")]
+
+    service.save_cached_voices(expected)
+
+    assert service.cached_voices() == expected
+    assert "secret" not in service.cache_path.read_text(encoding="utf-8")
+
+
+def test_malformed_azure_voice_cache_is_ignored(tmp_path) -> None:
+    service = AzureTTSService(tmp_path / "voices.json")
+    service.cache_path.write_text("not-json", encoding="utf-8")
+
+    assert service.cached_voices() == []
+
+
 def test_azure_synthesis_uses_ssml_controls_and_writes_mp3(monkeypatch, tmp_path) -> None:
     service = AzureTTSService()
     captured = {}
