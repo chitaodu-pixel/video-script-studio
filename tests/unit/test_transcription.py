@@ -2,7 +2,24 @@ from pathlib import Path
 
 import pytest
 
-from video_script_studio.services.transcription import TranscriptionService
+from video_script_studio.domain.models import TranscriptSegment
+from video_script_studio.services.transcription import TranscriptionService, format_transcript_text
+
+
+def test_format_transcript_uses_sentences_pauses_and_line_length() -> None:
+    segments = [
+        TranscriptSegment(0, 1, "第一句话。"),
+        TranscriptSegment(1.1, 2, "第二句没有标点"),
+        TranscriptSegment(3.5, 4, "停顿后另起一行"),
+    ]
+
+    assert format_transcript_text(segments) == "第一句话。\n第二句没有标点\n停顿后另起一行"
+
+
+def test_format_transcript_wraps_long_unpunctuated_content() -> None:
+    segments = [TranscriptSegment(0, 1, "一" * 25), TranscriptSegment(1, 2, "二" * 25)]
+
+    assert format_transcript_text(segments, max_line_characters=45) == "一" * 25 + "二" * 25
 
 
 def test_resolve_model_uses_configured_local_directory(monkeypatch, tmp_path) -> None:

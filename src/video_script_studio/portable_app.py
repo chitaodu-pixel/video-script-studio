@@ -22,7 +22,7 @@ from video_script_studio.services.project_store import ProjectStore
 from video_script_studio.services.preview_audio import PreviewAudioStore
 from video_script_studio.services.rewriter import count_effective_characters, rewrite
 from video_script_studio.services.text_cleaner import wash_document
-from video_script_studio.services.transcription import TranscriptionService
+from video_script_studio.services.transcription import TranscriptionService, format_transcript_text
 from video_script_studio.services.windows_tts import WindowsTTSService
 
 
@@ -54,6 +54,7 @@ class PortableApp(TkinterDnD.Tk):
         self.generated_audio: Path | None = None
         self.status = tk.StringVar(value="准备就绪。")
         self.ratio = tk.StringVar(value="1.0")
+        self.wash_relatedness = tk.StringVar(value="")
         self.voice = tk.StringVar()
         self.tts_engine = tk.StringVar(value="离线神经中文")
         saved_azure = self.azure_credentials.load()
@@ -123,7 +124,19 @@ class PortableApp(TkinterDnD.Tk):
         tab = ttk.Frame(self.notebook, padding=14)
         self.notebook.add(tab, text="2  洗稿")
         self.wash_original = self._add_text_box(tab, "原稿", height=9)
-        ttk.Button(tab, text="洗稿", style="Step.TButton", command=self.run_wash).pack(pady=7)
+        wash_controls = ttk.Frame(tab)
+        wash_controls.pack(pady=7)
+        ttk.Label(wash_controls, text="相关度（越低改动越大）").pack(side="left")
+        ttk.Combobox(
+            wash_controls,
+            textvariable=self.wash_relatedness,
+            values=("90%", "80%", "70%", "60%", "50%"),
+            state="readonly",
+            width=8,
+        ).pack(side="left", padx=8)
+        ttk.Button(
+            wash_controls, text="洗稿", style="Step.TButton", command=self.run_wash
+        ).pack(side="left")
         self.wash_result = self._add_text_box(tab, "清洗稿", height=9)
         ttk.Button(
             tab, text="下一步：复制到改稿", style="Step.TButton", command=self.to_rewrite
@@ -396,7 +409,7 @@ class PortableApp(TkinterDnD.Tk):
                 self.transcriber.save_segments(
                     self.project_root / "transcript" / "raw_segments.json", segments
                 )
-                text = "".join(segment.text for segment in segments)
+                text = format_transcript_text(segments)
                 export_text(self.project_root / "transcript" / "original.txt", text)
                 self.project.source_media = str(source)
                 self.project.stage_status["transcription"] = "completed"
@@ -449,8 +462,13 @@ class PortableApp(TkinterDnD.Tk):
         self.notebook.select(1)
 
     def run_wash(self) -> None:
+        if not self.wash_relatedness.get():
+            messagebox.showinfo("请选择相关度", "请先选择相关度，再点击“洗稿”。", parent=self)
+            self.status.set("请选择洗稿相关度。")
+            return
         source = self.wash_original.get("1.0", "end-1c")
-        wash = wash_document(source)
+        relatedness = int(self.wash_relatedness.get().rstrip("%"))
+        wash = wash_document(source, relatedness)
         result = wash.text
         self._set_widget(self.wash_result, result)
         if self._ensure_project():
@@ -458,7 +476,7 @@ class PortableApp(TkinterDnD.Tk):
         similarity = round(wash.similarity * 100)
         self.status.set(
             f"洗稿完成：校正 {wash.correction_count} 处，改写 {wash.rewrite_count} 处，"
-            f"文字相似度约 {similarity}%；请人工复核专有名词。"
+            f"选择相关度 {relatedness}%，结果文字相似度约 {similarity}%；请人工复核专有名词。"
         )
 
     def to_rewrite(self) -> None:
@@ -778,7 +796,7 @@ def main() -> int:
         try:
             MediaService().extract_wav(source, audio)
             segments = TranscriptionService().transcribe(audio, "small", "zh")
-            export_text(output, "".join(segment.text for segment in segments))
+            export_text(output, format_transcript_text(segments))
         except Exception:
             output.with_suffix(".error.txt").write_text(traceback.format_exc(), encoding="utf-8")
             return 1

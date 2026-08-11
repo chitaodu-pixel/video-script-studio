@@ -77,7 +77,7 @@ def _replace_counted(text: str, replacements: tuple[tuple[str, str], ...]) -> tu
     return text, count
 
 
-def _rewrite_sentence(sentence: str) -> tuple[str, int]:
+def _rewrite_sentence(sentence: str, relatedness: int = 70) -> tuple[str, int]:
     original = sentence
     sentence = re.sub(
         r"^因为(.+?)[，,]所以(.+?)([。！？!?]?)$",
@@ -107,7 +107,10 @@ def _rewrite_sentence(sentence: str) -> tuple[str, int]:
     sentence = re.sub(r"^(?:首先|第一)[，,]", "先来看，", sentence)
     sentence = re.sub(r"^(?:其次|第二)[，,]", "接着来看，", sentence)
     sentence = re.sub(r"^(?:最后|最终)[，,]", "到最后，", sentence)
-    sentence, phrase_count = _replace_counted(sentence, PHRASE_REPLACEMENTS)
+    # Lower relatedness means a broader set of phrases may be replaced.
+    replacement_share = {90: 0.25, 80: 0.5, 70: 1.0, 60: 1.0, 50: 1.0}[relatedness]
+    replacement_count = max(1, round(len(PHRASE_REPLACEMENTS) * replacement_share))
+    sentence, phrase_count = _replace_counted(sentence, PHRASE_REPLACEMENTS[:replacement_count])
     return sentence, phrase_count + int(sentence != original and phrase_count == 0)
 
 
@@ -123,16 +126,18 @@ def _ngram_similarity(left: str, right: str, size: int = 4) -> float:
     return len(a & b) / max(len(a | b), 1)
 
 
-def wash_document(text: str) -> WashResult:
+def wash_document(text: str, relatedness: int = 70) -> WashResult:
+    if relatedness not in (50, 60, 70, 80, 90):
+        raise ValueError("相关度必须是 50%、60%、70%、80% 或 90%。")
     cleaned = clean_text(text)
     corrected, correction_count = _replace_counted(cleaned, COMMON_ASR_CORRECTIONS)
     rewritten_sentences = []
     rewrite_count = 0
     for sentence in split_sentences(corrected):
-        rewritten, count = _rewrite_sentence(sentence)
+        rewritten, count = _rewrite_sentence(sentence, relatedness)
         rewritten_sentences.append(rewritten)
         rewrite_count += count
-    result = "".join(rewritten_sentences)
+    result = "\n".join(rewritten_sentences)
     return WashResult(
         text=result,
         correction_count=correction_count,
@@ -141,8 +146,8 @@ def wash_document(text: str) -> WashResult:
     )
 
 
-def wash_text(text: str) -> str:
-    return wash_document(text).text
+def wash_text(text: str, relatedness: int = 70) -> str:
+    return wash_document(text, relatedness).text
 
 
 def split_sentences(text: str) -> list[str]:

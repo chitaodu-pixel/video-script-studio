@@ -29,3 +29,13 @@ def test_wash_document_corrects_asr_error_and_restructures_sentence() -> None:
     assert result.correction_count == 1
     assert result.rewrite_count > 0
     assert result.similarity < 1
+
+
+def test_relatedness_controls_replacement_scope() -> None:
+    source = "这个方法可以使用，这种方式非常方便。"
+
+    conservative = wash_document(source, 90)
+    stronger = wash_document(source, 70)
+
+    assert conservative.text != stronger.text
+    assert stronger.rewrite_count > conservative.rewrite_count

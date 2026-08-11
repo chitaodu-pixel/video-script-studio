@@ -9,6 +9,34 @@ from typing import Callable
 from video_script_studio.domain.models import TranscriptSegment
 
 
+SENTENCE_ENDINGS = ("。", "！", "？", "!", "?", "；", ";")
+
+
+def format_transcript_text(
+    segments: list[TranscriptSegment], max_line_characters: int = 45
+) -> str:
+    """Turn ASR fragments into readable, content-aware lines."""
+    lines: list[str] = []
+    current = ""
+    previous_end: float | None = None
+    for segment in segments:
+        fragment = segment.text.strip()
+        if not fragment:
+            continue
+        long_pause = previous_end is not None and segment.start - previous_end >= 1.2
+        if current and long_pause:
+            lines.append(current)
+            current = ""
+        current += fragment
+        previous_end = segment.end
+        if fragment.endswith(SENTENCE_ENDINGS) or len(current) >= max_line_characters:
+            lines.append(current)
+            current = ""
+    if current:
+        lines.append(current)
+    return "\n".join(lines)
+
+
 class TranscriptionService:
     @staticmethod
     def resolve_model(model_name: str) -> str:
