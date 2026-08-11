@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 import queue
+import re
 import shutil
 import sys
 import threading
@@ -36,8 +39,13 @@ class PortableApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("VideoScript Studio - 视频文案工作台")
-        self.geometry("1100x760")
-        self.minsize(900, 650)
+        self.minsize(800, 600)
+        self.window_settings_path = (
+            Path(os.environ.get("APPDATA", Path.home()))
+            / "VideoScriptStudio"
+            / "window-settings.json"
+        )
+        self._restore_window_geometry()
         self.app_root = resolve_app_root()
         self.store = ProjectStore()
         self.media = MediaService()
@@ -72,6 +80,53 @@ class PortableApp(TkinterDnD.Tk):
         self.after(100, self._poll_events)
         self.after(300, self._load_voices)
 
+    def _default_window_geometry(self) -> str:
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        width = min(1200, max(800, int(screen_width * 0.85)))
+        height = min(850, max(600, int((screen_height - 60) * 0.88)))
+        width = min(width, max(800, screen_width - 40))
+        height = min(height, max(600, screen_height - 80))
+        x = max(0, (screen_width - width) // 2)
+        y = max(0, (screen_height - height) // 2 - 10)
+        return f"{width}x{height}+{x}+{y}"
+
+    def _restore_window_geometry(self) -> None:
+        geometry = self._default_window_geometry()
+        zoomed = False
+        try:
+            settings = json.loads(self.window_settings_path.read_text(encoding="utf-8"))
+            saved = str(settings.get("geometry", ""))
+            match = re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", saved)
+            if match:
+                width, height, x, y = map(int, match.groups())
+                screen_width = self.winfo_screenwidth()
+                screen_height = self.winfo_screenheight()
+                width = min(max(width, 800), max(800, screen_width - 20))
+                height = min(max(height, 600), max(600, screen_height - 60))
+                x = min(max(x, 0), max(0, screen_width - width))
+                y = min(max(y, 0), max(0, screen_height - height))
+                geometry = f"{width}x{height}+{x}+{y}"
+            zoomed = bool(settings.get("zoomed", False))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+        self.geometry(geometry)
+        if zoomed:
+            self.after(0, lambda: self.state("zoomed"))
+
+    def _save_window_geometry(self) -> None:
+        try:
+            self.window_settings_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "geometry": self.geometry(),
+                "zoomed": self.state() == "zoomed",
+            }
+            self.window_settings_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+
     def _build(self) -> None:
         style = ttk.Style(self)
         style.configure("Title.TLabel", font=("Microsoft YaHei UI", 18, "bold"))
@@ -95,6 +150,7 @@ class PortableApp(TkinterDnD.Tk):
 
     def _build_extract_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=14)
+        tab.columnconfigure(0, weight=1)
         self.notebook.add(tab, text="1  提取文案")
         self.drop_area = ttk.Label(
             tab,
@@ -103,18 +159,18 @@ class PortableApp(TkinterDnD.Tk):
             relief="groove",
             padding=28,
         )
-        self.drop_area.pack(fill="x")
+        self.drop_area.grid(row=0, column=0, sticky="ew")
         self.drop_area.drop_target_register(DND_FILES)
         self.drop_area.dnd_bind("<<DropEnter>>", self._drop_enter)
         self.drop_area.dnd_bind("<<DropLeave>>", self._drop_leave)
         self.drop_area.dnd_bind("<<Drop>>", self._drop_video)
         self.import_button = ttk.Button(tab, text="导入视频文件", command=self.choose_video)
-        self.import_button.pack(pady=8)
+        self.import_button.grid(row=1, column=0, pady=8)
         self.extract_progress = ttk.Progressbar(tab, maximum=100)
-        self.extract_progress.pack(fill="x", pady=(2, 8))
-        self.extract_text = self._add_text_box(tab, "提取结果")
+        self.extract_progress.grid(row=2, column=0, sticky="ew", pady=(2, 8))
+        self.extract_text = self._add_text_box(tab, "提取结果", row=3)
         buttons = ttk.Frame(tab)
-        buttons.pack(fill="x", pady=8)
+        buttons.grid(row=5, column=0, sticky="ew", pady=8)
         ttk.Button(buttons, text="保存文案", command=self.save_extract).pack(side="left")
         ttk.Button(
             buttons, text="下一步：复制到洗稿", style="Step.TButton", command=self.to_wash
@@ -122,10 +178,11 @@ class PortableApp(TkinterDnD.Tk):
 
     def _build_wash_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=14)
+        tab.columnconfigure(0, weight=1)
         self.notebook.add(tab, text="2  洗稿")
-        self.wash_original = self._add_text_box(tab, "原稿", height=9)
+        self.wash_original = self._add_text_box(tab, "原稿", height=9, row=0)
         wash_controls = ttk.Frame(tab)
-        wash_controls.pack(pady=7)
+        wash_controls.grid(row=2, column=0, pady=7)
         ttk.Label(wash_controls, text="保留相关度（越低改动越大）").pack(side="left")
         ttk.Combobox(
             wash_controls,
@@ -137,16 +194,17 @@ class PortableApp(TkinterDnD.Tk):
         ttk.Button(
             wash_controls, text="洗稿", style="Step.TButton", command=self.run_wash
         ).pack(side="left")
-        self.wash_result = self._add_text_box(tab, "清洗稿", height=9)
+        self.wash_result = self._add_text_box(tab, "清洗稿", height=9, row=3)
         ttk.Button(
             tab, text="下一步：复制到改稿", style="Step.TButton", command=self.to_rewrite
-        ).pack(anchor="e", pady=8)
+        ).grid(row=5, column=0, sticky="e", pady=8)
 
     def _build_rewrite_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=14)
+        tab.columnconfigure(0, weight=1)
         self.notebook.add(tab, text="3  改稿")
         controls = ttk.Frame(tab)
-        controls.pack(fill="x", pady=(0, 8))
+        controls.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         ttk.Label(controls, text="目标倍率").pack(side="left")
         ttk.Combobox(
             controls,
@@ -158,18 +216,19 @@ class PortableApp(TkinterDnD.Tk):
         ttk.Button(controls, text="离线规则改写", command=self.run_rewrite).pack(side="left")
         self.rewrite_count = ttk.Label(controls, text="原文 0 / 目标 0 / 实际 0")
         self.rewrite_count.pack(side="left", padx=14)
-        self.rewrite_source = self._add_text_box(tab, "待改稿", height=8)
-        self.rewrite_result = self._add_text_box(tab, "改写结果", height=11)
+        self.rewrite_source = self._add_text_box(tab, "待改稿", height=8, row=1)
+        self.rewrite_result = self._add_text_box(tab, "改写结果", height=11, row=3)
         ttk.Button(
             tab, text="下一步：复制到文本转语音", style="Step.TButton", command=self.to_tts
-        ).pack(anchor="e", pady=8)
+        ).grid(row=5, column=0, sticky="e", pady=8)
 
     def _build_tts_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=14)
+        tab.columnconfigure(0, weight=1)
         self.notebook.add(tab, text="4  文本转语音")
-        self.tts_text = self._add_text_box(tab, "配音文本（可继续编辑）", height=15)
+        self.tts_text = self._add_text_box(tab, "配音文本（可继续编辑）", height=15, row=0)
         controls = ttk.Frame(tab)
-        controls.pack(fill="x", pady=8)
+        controls.grid(row=2, column=0, sticky="ew", pady=8)
         ttk.Label(controls, text="配音引擎").pack(side="left")
         self.engine_combo = ttk.Combobox(
             controls,
@@ -190,14 +249,14 @@ class PortableApp(TkinterDnD.Tk):
         self.voice_combo.pack(side="left", padx=(8, 0), fill="x", expand=True)
 
         voice_loading = ttk.Frame(tab)
-        voice_loading.pack(fill="x", pady=(0, 8))
+        voice_loading.grid(row=3, column=0, sticky="ew", pady=(0, 8))
         self.voice_load_progress = ttk.Progressbar(voice_loading, mode="determinate", maximum=100)
         self.voice_load_progress.pack(side="left", fill="x", expand=True)
         self.voice_load_label = ttk.Label(voice_loading, text="声优尚未加载", width=28)
         self.voice_load_label.pack(side="left", padx=(10, 0))
 
         online = ttk.LabelFrame(tab, text="在线神经声优设置（仅 Azure 模式需要）", padding=8)
-        online.pack(fill="x", pady=(0, 8))
+        online.grid(row=4, column=0, sticky="ew", pady=(0, 8))
         ttk.Label(online, text="区域").pack(side="left")
         ttk.Entry(online, textvariable=self.azure_region, width=14).pack(side="left", padx=(6, 16))
         ttk.Label(online, text="Speech 密钥").pack(side="left")
@@ -212,7 +271,7 @@ class PortableApp(TkinterDnD.Tk):
         ).pack(side="right")
 
         tuning = ttk.LabelFrame(tab, text="声音调节", padding=8)
-        tuning.pack(fill="x", pady=(0, 8))
+        tuning.grid(row=5, column=0, sticky="ew", pady=(0, 8))
         ttk.Label(tuning, text="语速（-50～50%）").pack(side="left")
         ttk.Spinbox(tuning, from_=-50, to=50, textvariable=self.tts_rate, width=6).pack(
             side="left", padx=(6, 18)
@@ -226,11 +285,11 @@ class PortableApp(TkinterDnD.Tk):
             side="left", padx=6
         )
         self.tts_progress = ttk.Progressbar(tab, maximum=100)
-        self.tts_progress.pack(fill="x", pady=8)
+        self.tts_progress.grid(row=6, column=0, sticky="ew", pady=8)
         self.audio_label = ttk.Label(tab, text="尚未生成 MP3")
-        self.audio_label.pack(anchor="w")
+        self.audio_label.grid(row=7, column=0, sticky="w")
         audio_buttons = ttk.Frame(tab)
-        audio_buttons.pack(fill="x", pady=8)
+        audio_buttons.grid(row=8, column=0, sticky="ew", pady=8)
         self.preview_button = ttk.Button(
             audio_buttons, text="▶ 试听", command=self.play_audio, state="disabled"
         )
@@ -244,14 +303,23 @@ class PortableApp(TkinterDnD.Tk):
         ).pack(side="left", padx=8)
         ttk.Button(audio_buttons, text="保存 MP3", command=self.save_audio).pack(side="right")
 
-    def _add_text_box(self, parent, label: str, height: int = 12) -> tk.Text:
+    def _add_text_box(
+        self, parent, label: str, height: int = 12, row: int | None = None
+    ) -> tk.Text:
         heading = ttk.Frame(parent)
-        heading.pack(fill="x", pady=(5, 2))
+        if row is None:
+            heading.pack(fill="x", pady=(5, 2))
+        else:
+            heading.grid(row=row, column=0, sticky="ew", pady=(5, 2))
         ttk.Label(heading, text=label).pack(side="left")
         counter = tk.StringVar(value="字数：0")
         ttk.Label(heading, textvariable=counter).pack(side="right")
         frame = ttk.Frame(parent)
-        frame.pack(fill="both", expand=True)
+        if row is None:
+            frame.pack(fill="both", expand=True)
+        else:
+            frame.grid(row=row + 1, column=0, sticky="nsew")
+            parent.rowconfigure(row + 1, weight=1, minsize=90)
         text = tk.Text(frame, wrap="word", height=height, font=("Microsoft YaHei UI", 11), undo=True)
         scrollbar = ttk.Scrollbar(frame, command=text.yview)
         text.configure(yscrollcommand=scrollbar.set)
@@ -709,6 +777,7 @@ class PortableApp(TkinterDnD.Tk):
 
     def _on_close(self) -> None:
         self.audio_player.stop()
+        self._save_window_geometry()
         self.destroy()
 
     def save_audio(self) -> None:
