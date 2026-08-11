@@ -62,7 +62,7 @@ class PortableApp(TkinterDnD.Tk):
         self.generated_audio: Path | None = None
         self.status = tk.StringVar(value="准备就绪。")
         self.ratio = tk.StringVar(value="1.0")
-        self.wash_relatedness = tk.StringVar(value="")
+        self.wash_relatedness = tk.StringVar(value="70%")
         self.voice = tk.StringVar()
         self.tts_engine = tk.StringVar(value="离线神经中文")
         saved_azure = self.azure_credentials.load()
@@ -102,10 +102,11 @@ class PortableApp(TkinterDnD.Tk):
                 width, height, x, y = map(int, match.groups())
                 screen_width = self.winfo_screenwidth()
                 screen_height = self.winfo_screenheight()
+                usable_height = max(600, screen_height - 60)
                 width = min(max(width, 800), max(800, screen_width - 20))
-                height = min(max(height, 600), max(600, screen_height - 60))
+                height = min(max(height, 600), usable_height)
                 x = min(max(x, 0), max(0, screen_width - width))
-                y = min(max(y, 0), max(0, screen_height - height))
+                y = min(max(y, 0), max(0, usable_height - height))
                 geometry = f"{width}x{height}+{x}+{y}"
             zoomed = bool(settings.get("zoomed", False))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -138,15 +139,30 @@ class PortableApp(TkinterDnD.Tk):
         ttk.Button(header, text="新建项目", command=self.create_project).pack(side="right", padx=4)
         ttk.Button(header, text="打开项目", command=self.open_project).pack(side="right", padx=4)
 
+        self.status_label = ttk.Label(
+            self,
+            textvariable=self.status,
+            relief="sunken",
+            anchor="w",
+            justify="left",
+            padding=6,
+            wraplength=760,
+        )
+        # Reserve the status area before the expanding notebook so it can never
+        # be pushed below the window at smaller sizes.
+        self.status_label.pack(side="bottom", fill="x", padx=12, pady=(0, 10))
+        self.bind("<Configure>", self._on_window_resized, add="+")
+
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 8))
         self._build_extract_tab()
         self._build_wash_tab()
         self._build_rewrite_tab()
         self._build_tts_tab()
-        ttk.Label(self, textvariable=self.status, relief="sunken", anchor="w", padding=6).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+
+    def _on_window_resized(self, event) -> None:
+        if event.widget is self and hasattr(self, "status_label"):
+            self.status_label.configure(wraplength=max(300, event.width - 50))
 
     def _build_extract_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=14)
