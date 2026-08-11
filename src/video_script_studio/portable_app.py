@@ -23,7 +23,7 @@ from video_script_studio.services.kokoro_tts import KokoroTTSService, KokoroVoic
 from video_script_studio.services.media import SUPPORTED_VIDEO_EXTENSIONS, MediaService
 from video_script_studio.services.project_store import ProjectStore
 from video_script_studio.services.preview_audio import PreviewAudioStore
-from video_script_studio.services.rewriter import count_effective_characters, rewrite
+from video_script_studio.services.rewriter import count_effective_characters
 from video_script_studio.services.text_cleaner import wash_document
 from video_script_studio.services.transcription import TranscriptionService, format_transcript_text
 from video_script_studio.services.windows_tts import WindowsTTSService
@@ -61,7 +61,6 @@ class PortableApp(TkinterDnD.Tk):
         self.selected_video: Path | None = None
         self.generated_audio: Path | None = None
         self.status = tk.StringVar(value="准备就绪。")
-        self.ratio = tk.StringVar(value="1.0")
         self.wash_relatedness = tk.StringVar(value="70%")
         self.voice = tk.StringVar()
         self.tts_engine = tk.StringVar(value="离线神经中文")
@@ -135,7 +134,7 @@ class PortableApp(TkinterDnD.Tk):
         header = ttk.Frame(self, padding=12)
         header.pack(fill="x")
         ttk.Label(header, text="VideoScript Studio", style="Title.TLabel").pack(side="left")
-        ttk.Label(header, text="视频文案提取 · 洗稿 · 改稿 · 配音").pack(side="left", padx=16)
+        ttk.Label(header, text="视频文案提取 · 洗稿 · 配音").pack(side="left", padx=16)
         ttk.Button(header, text="新建项目", command=self.create_project).pack(side="right", padx=4)
         ttk.Button(header, text="打开项目", command=self.open_project).pack(side="right", padx=4)
 
@@ -157,7 +156,6 @@ class PortableApp(TkinterDnD.Tk):
         self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 8))
         self._build_extract_tab()
         self._build_wash_tab()
-        self._build_rewrite_tab()
         self._build_tts_tab()
 
     def _on_window_resized(self, event) -> None:
@@ -212,36 +210,13 @@ class PortableApp(TkinterDnD.Tk):
         ).pack(side="left")
         self.wash_result = self._add_text_box(tab, "清洗稿", height=9, row=3)
         ttk.Button(
-            tab, text="下一步：复制到改稿", style="Step.TButton", command=self.to_rewrite
-        ).grid(row=5, column=0, sticky="e", pady=8)
-
-    def _build_rewrite_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=14)
-        tab.columnconfigure(0, weight=1)
-        self.notebook.add(tab, text="3  改稿")
-        controls = ttk.Frame(tab)
-        controls.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        ttk.Label(controls, text="目标倍率").pack(side="left")
-        ttk.Combobox(
-            controls,
-            textvariable=self.ratio,
-            values=("0.5", "0.75", "1.0", "1.5", "2.0"),
-            state="readonly",
-            width=8,
-        ).pack(side="left", padx=8)
-        ttk.Button(controls, text="离线规则改写", command=self.run_rewrite).pack(side="left")
-        self.rewrite_count = ttk.Label(controls, text="原文 0 / 目标 0 / 实际 0")
-        self.rewrite_count.pack(side="left", padx=14)
-        self.rewrite_source = self._add_text_box(tab, "待改稿", height=8, row=1)
-        self.rewrite_result = self._add_text_box(tab, "改写结果", height=11, row=3)
-        ttk.Button(
             tab, text="下一步：复制到文本转语音", style="Step.TButton", command=self.to_tts
         ).grid(row=5, column=0, sticky="e", pady=8)
 
     def _build_tts_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=14)
         tab.columnconfigure(0, weight=1)
-        self.notebook.add(tab, text="4  文本转语音")
+        self.notebook.add(tab, text="3  文本转语音")
         self.tts_text = self._add_text_box(tab, "配音文本（可继续编辑）", height=15, row=0)
         controls = ttk.Frame(tab)
         controls.grid(row=2, column=0, sticky="ew", pady=8)
@@ -443,7 +418,7 @@ class PortableApp(TkinterDnD.Tk):
         self._load_widget(self.extract_text, root / "transcript" / "original.txt")
         self._load_widget(self.wash_original, root / "transcript" / "original.txt")
         self._load_widget(self.wash_result, root / "transcript" / "cleaned.txt")
-        self._load_widget(self.rewrite_result, root / "rewrite" / "rewrite.txt")
+        self._load_widget(self.tts_text, root / "transcript" / "cleaned.txt")
         self.status.set(f"当前项目：{root}")
 
     def _load_widget(self, widget: tk.Text, path: Path) -> None:
@@ -562,23 +537,9 @@ class PortableApp(TkinterDnD.Tk):
             f"改写 {wash.rewrite_count} 处；请人工复核专有名词。"
         )
 
-    def to_rewrite(self) -> None:
-        self._set_widget(self.rewrite_source, self.wash_result.get("1.0", "end-1c"))
-        self.notebook.select(2)
-
-    def run_rewrite(self) -> None:
-        result = rewrite(self.rewrite_source.get("1.0", "end-1c"), float(self.ratio.get()))
-        self._set_widget(self.rewrite_result, result.text)
-        self.rewrite_count.configure(
-            text=f"原文 {result.source_count} / 目标 {result.target_count} / 实际 {result.actual_count}"
-        )
-        if self._ensure_project():
-            export_text(self.project_root / "rewrite" / "rewrite.txt", result.text)
-        self.status.set("改稿完成。" if result.within_tolerance else "改稿完成，但字数超出目标容差。")
-
     def to_tts(self) -> None:
-        self._set_widget(self.tts_text, self.rewrite_result.get("1.0", "end-1c"))
-        self.notebook.select(3)
+        self._set_widget(self.tts_text, self.wash_result.get("1.0", "end-1c"))
+        self.notebook.select(2)
 
     def _load_voices(self) -> None:
         if str(self.refresh_voices_button["state"]) == "disabled":
